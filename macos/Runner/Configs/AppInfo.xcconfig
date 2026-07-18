@@ -1,0 +1,10 @@
+// Application-level settings for the Runner target.
+
+// The application's name (shown in the menu bar, dock tooltip, About dialog).
+PRODUCT_NAME = CBScope
+
+// The application's bundle identifier
+PRODUCT_BUNDLE_IDENTIFIER = net.xzgroup.cbscope
+
+// The copyright displayed in application information
+PRODUCT_COPYRIGHT = Copyright © 2026 XZGROUP. All rights reserved.
