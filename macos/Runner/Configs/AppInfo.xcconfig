@@ -10,4 +10,4 @@ PRODUCT_NAME = CBScope
 PRODUCT_BUNDLE_IDENTIFIER = com.qsobook.qsoBook
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 XZGROUP. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 CBScope. All rights reserved.

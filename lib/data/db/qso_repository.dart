@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:drift/drift.dart';
 
+import '../../core/util/cb_dxcc.dart';
 import '../../core/util/dedup_key.dart';
 import '../adif/adif_parser.dart';
 import '../wsjtx/messages.dart';
@@ -9,11 +11,70 @@ import 'database.dart';
 
 enum ReviewState { any, reviewed, unreviewed }
 
+class StatsExtras {
+  final int? bestSnr;
+  final Qso? bestSnrQso;
+  final int? worstSnr;
+  final Qso? worstSnrQso;
+  final double? longestKm;
+  final Qso? longestQso;
+  const StatsExtras({
+    this.bestSnr, this.bestSnrQso,
+    this.worstSnr, this.worstSnrQso,
+    this.longestKm, this.longestQso,
+  });
+}
+
+// Inline geo helpers to keep the repository self-contained.
+(double, double)? _gridToLatLng(String grid) {
+  final g = grid.toUpperCase();
+  if (g.length < 4) return null;
+  final f1 = g.codeUnitAt(0) - 0x41, f2 = g.codeUnitAt(1) - 0x41;
+  final s1 = g.codeUnitAt(2) - 0x30, s2 = g.codeUnitAt(3) - 0x30;
+  if (f1 < 0 || f1 > 17 || f2 < 0 || f2 > 17 || s1 < 0 || s1 > 9 || s2 < 0 || s2 > 9) return null;
+  double lon = (-180 + f1 * 20 + s1 * 2).toDouble();
+  double lat = (-90 + f2 * 10 + s2).toDouble();
+  double lonSz = 2.0, latSz = 1.0;
+  if (g.length >= 6) {
+    final ss1 = g.toLowerCase().codeUnitAt(4) - 0x61;
+    final ss2 = g.toLowerCase().codeUnitAt(5) - 0x61;
+    if (ss1 >= 0 && ss1 < 24 && ss2 >= 0 && ss2 < 24) {
+      lon += ss1 * (2 / 24); lat += ss2 * (1 / 24);
+      lonSz = 2 / 24; latSz = 1 / 24;
+    }
+  }
+  return (lat + latSz / 2, lon + lonSz / 2);
+}
+
+double _greatCircleKm(double lat1, double lon1, double lat2, double lon2) {
+  const R = 6371.0088;
+  double toRad(double d) => d * math.pi / 180;
+  final dLat = toRad(lat2 - lat1);
+  final dLon = toRad(lon2 - lon1);
+  final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.cos(toRad(lat1)) * math.cos(toRad(lat2)) *
+          math.sin(dLon / 2) * math.sin(dLon / 2);
+  return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+}
+
 class QsoRepository {
   final AppDatabase db;
   QsoRepository(this.db);
 
-  Future<int> insertFromAdif(AdifRecord r) async {
+  /// Insert a QSO parsed from an ADIF record.
+  ///
+  /// [fallbackMyCall] / [fallbackMyGrid] come from user settings and are
+  /// applied when the record itself doesn't carry a station call / QTH — so
+  /// portable operation gets logged with the *current* locator even if
+  /// WSJT-CB forgot to include it. [gridResolver] optionally fills in the
+  /// DX gridsquare when the ADIF has none (typical for CB decodes) — pass
+  /// `CallsignResolver.gridFor`.
+  Future<int> insertFromAdif(
+    AdifRecord r, {
+    String? fallbackMyCall,
+    String? fallbackMyGrid,
+    String? Function(String call)? gridResolver,
+  }) async {
     final t = r.timeOnUtc();
     if (t == null || r.call() == null || r.band() == null || r.mode() == null) return 0;
     final key = qsoDedupKey(
@@ -22,6 +83,28 @@ class QsoRepository {
       band: r.band()!,
       mode: r.mode()!,
     );
+
+    // Auto-enrichment: grid from resolver (PSK cache), country from CB prefix,
+    // my_call/my_grid from settings.
+    var grid = r.gridsquare();
+    if ((grid == null || grid.length < 4) && gridResolver != null) {
+      grid = gridResolver(r.call()!);
+    }
+    final country = (r.country() ?? '').isNotEmpty
+        ? r.country()
+        : countryFromCbCallsign(r.call()!);
+    final myCall = (r.stationCallsign() ?? r.operator_() ?? '').isNotEmpty
+        ? (r.stationCallsign() ?? r.operator_())
+        : fallbackMyCall;
+    final myGrid = (r.myGridsquare() ?? '').isNotEmpty ? r.myGridsquare() : fallbackMyGrid;
+
+    // Persist enrichments back into rawFields so CSV export sees them.
+    final enrichedFields = Map<String, String>.from(r.fields);
+    if (grid != null    && grid.isNotEmpty)    enrichedFields['gridsquare']       = grid;
+    if (country != null && country.isNotEmpty) enrichedFields['country']          = country;
+    if (myCall != null  && myCall.isNotEmpty)  enrichedFields['station_callsign'] = myCall;
+    if (myGrid != null  && myGrid.isNotEmpty)  enrichedFields['my_gridsquare']    = myGrid;
+
     final companion = QsosCompanion.insert(
       call: r.call()!.toUpperCase(),
       timeOn: t,
@@ -32,35 +115,48 @@ class QsoRepository {
       freqMhz: Value(double.tryParse(r.freqMhz() ?? '')),
       rstSent: Value(r.rstSent()),
       rstRcvd: Value(r.rstRcvd()),
-      gridsquare: Value(r.gridsquare()),
-      myCall: Value(r.stationCallsign() ?? r.operator_()),
-      myGrid: Value(r.myGridsquare()),
+      gridsquare: Value(grid),
+      myCall: Value(myCall),
+      myGrid: Value(myGrid),
       name: Value(r.name()),
-      country: Value(r.country()),
+      country: Value(country),
       comment: Value(r.comment()),
       source: const Value('adif'),
       dedupKey: key,
-      // Preserve the entire ADIF record verbatim so QSLMSG, NOTES, POWER, QTH,
-      // APP_* and user-defined fields survive round-trips.
-      rawFields: Value(jsonEncode(r.fields)),
+      rawFields: Value(jsonEncode(enrichedFields)),
     );
     final n = await db.into(db.qsos).insert(companion, mode: InsertMode.insertOrIgnore);
-    if (n > 0 && r.gridsquare() != null && r.gridsquare()!.length >= 4) {
-      await upsertCallsignGrid(r.call()!, r.gridsquare()!, 'log');
+    if (n > 0 && grid != null && grid.length >= 4) {
+      await upsertCallsignGrid(r.call()!, grid, 'log');
     }
     return n;
   }
 
-  Future<int> insertFromWsjtx(WsjtxQsoLogged m) async {
+  Future<int> insertFromWsjtx(
+    WsjtxQsoLogged m, {
+    Map<String, String>? extraFields,
+    String? fallbackMyCall,
+    String? fallbackMyGrid,
+    String? Function(String call)? gridResolver,
+  }) async {
     final key = qsoDedupKey(
       call: m.dxCall,
       timeOnUtc: m.timeOn.toUtc(),
       band: freqToBand(m.txFrequency),
       mode: m.mode,
     );
+
+    var dxGrid = m.dxGrid;
+    if (dxGrid.length < 4 && gridResolver != null) {
+      dxGrid = gridResolver(m.dxCall) ?? dxGrid;
+    }
+    final myCall = m.myCall.isNotEmpty ? m.myCall : (fallbackMyCall ?? '');
+    final myGrid = m.myGrid.isNotEmpty ? m.myGrid : (fallbackMyGrid ?? '');
+    final country = countryFromCbCallsign(m.dxCall);
+
     final raw = <String, String>{
       'call': m.dxCall,
-      'gridsquare': m.dxGrid,
+      'gridsquare': dxGrid,
       'mode': m.mode,
       'rst_sent': m.reportSent,
       'rst_rcvd': m.reportReceived,
@@ -68,11 +164,13 @@ class QsoRepository {
       'comment': m.comments,
       'name': m.name,
       'operator': m.opCall,
-      'station_callsign': m.myCall,
-      'my_gridsquare': m.myGrid,
+      'station_callsign': myCall,
+      'my_gridsquare': myGrid,
       'srx_string': m.exchangeReceived,
       'stx_string': m.exchangeSent,
+      if (country != null) 'country': country,
       if (m.adifPropagationMode != null) 'prop_mode': m.adifPropagationMode!,
+      if (extraFields != null) ...extraFields,
     };
     final companion = QsosCompanion.insert(
       call: m.dxCall.toUpperCase(),
@@ -83,18 +181,19 @@ class QsoRepository {
       freqMhz: Value(m.txFrequency / 1e6),
       rstSent: Value(m.reportSent),
       rstRcvd: Value(m.reportReceived),
-      gridsquare: Value(m.dxGrid),
-      myCall: Value(m.myCall),
-      myGrid: Value(m.myGrid),
+      gridsquare: Value(dxGrid),
+      myCall: Value(myCall),
+      myGrid: Value(myGrid),
       name: Value(m.name),
+      country: Value(country),
       comment: Value(m.comments),
       source: const Value('udp'),
       dedupKey: key,
       rawFields: Value(jsonEncode(raw)),
     );
     final n = await db.into(db.qsos).insert(companion, mode: InsertMode.insertOrIgnore);
-    if (n > 0 && m.dxGrid.length >= 4) {
-      await upsertCallsignGrid(m.dxCall, m.dxGrid, 'log');
+    if (n > 0 && dxGrid.length >= 4) {
+      await upsertCallsignGrid(m.dxCall, dxGrid, 'log');
     }
     return n;
   }
@@ -314,6 +413,50 @@ class QsoRepository {
       'SELECT $column AS k, COUNT(*) AS c FROM qsos GROUP BY k ORDER BY c DESC',
     ).get();
     return {for (final r in rows) (r.read<String?>('k') ?? 'Unknown'): r.read<int>('c')};
+  }
+
+  /// Unique callsigns in the logbook. Cheap lookup for NEW-CQ detection on
+  /// the live map.
+  Future<Set<String>> workedCallsigns() async {
+    final rows = await db.customSelect('SELECT DISTINCT call FROM qsos').get();
+    return {for (final r in rows) r.read<String>('call').toUpperCase()};
+  }
+
+  /// Interesting extras for the stats page — computed on demand so we don't
+  /// keep them in a separate table.
+  Future<StatsExtras> extras({
+    required double? myLat, required double? myLon,
+  }) async {
+    // Highest and lowest RST received (numeric — first token, integer parse).
+    int? bestSnr, worstSnr;
+    Qso? bestSnrQso, worstSnrQso;
+    // Longest distance QSO (computed against the user's grid if provided).
+    double? longestKm;
+    Qso? longestQso;
+
+    final qsos = await all();
+    for (final q in qsos) {
+      final rst = q.rstRcvd?.trim();
+      if (rst != null && rst.isNotEmpty) {
+        final n = int.tryParse(rst.replaceAll(RegExp(r'[^-0-9]'), ''));
+        if (n != null) {
+          if (bestSnr  == null || n > bestSnr)  { bestSnr  = n; bestSnrQso  = q; }
+          if (worstSnr == null || n < worstSnr) { worstSnr = n; worstSnrQso = q; }
+        }
+      }
+      if (myLat != null && myLon != null && q.gridsquare != null && q.gridsquare!.length >= 4) {
+        final ll = _gridToLatLng(q.gridsquare!);
+        if (ll != null) {
+          final d = _greatCircleKm(myLat, myLon, ll.$1, ll.$2);
+          if (longestKm == null || d > longestKm) { longestKm = d; longestQso = q; }
+        }
+      }
+    }
+    return StatsExtras(
+      bestSnr: bestSnr, bestSnrQso: bestSnrQso,
+      worstSnr: worstSnr, worstSnrQso: worstSnrQso,
+      longestKm: longestKm, longestQso: longestQso,
+    );
   }
 
   /// Frequency-usage histogram grouped by [binKhz] wide bins. Returns

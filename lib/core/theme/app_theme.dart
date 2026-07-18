@@ -10,7 +10,7 @@ class AppTheme {
   // Menlo ships with macOS; Consolas on Windows; DejaVu Sans Mono on most Linux.
   static const _mono = 'Menlo';
 
-  // Palette borrowed from xzgroup.net/wsjt-cb.html — mint-green on near-black.
+  // CRT-style mint-green on near-black.
   static const _green    = Color(0xFF49FF7A);
   static const _teal     = Color(0xFF00FFCC);
   static const _paleFg   = Color(0xFFC9FFCF);

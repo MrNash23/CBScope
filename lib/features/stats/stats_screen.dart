@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_card.dart';
 import '../../core/widgets/propagation_card.dart';
+import '../../data/db/qso_repository.dart';
 import '../../providers/providers.dart';
 import 'distance_polar_chart.dart';
 
@@ -39,6 +40,8 @@ class StatsScreen extends ConsumerWidget {
             loading: () => const SizedBox(height: 96, child: Center(child: CircularProgressIndicator.adaptive())),
             error: (e, _) => Text('$e'),
           ),
+          const SizedBox(height: 16),
+          const _HighlightsCard(),
           const SizedBox(height: 16),
           const PropagationCard(),
           const SizedBox(height: 16),
@@ -207,6 +210,59 @@ class _FreqHistogram extends StatelessWidget {
           )),
         ),
       ],
+    );
+  }
+}
+
+/// Highlights strip: longest QSO, best signal, weakest signal. Rendered as
+/// three compact tiles with the winner's callsign + supporting metric.
+class _HighlightsCard extends ConsumerWidget {
+  const _HighlightsCard();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final extras = ref.watch(statsExtrasProvider);
+    final unit = ref.watch(settingsProvider).distanceUnit;
+    return extras.when(
+      loading: () => const AppCard(child: SizedBox(height: 60,
+        child: Center(child: CircularProgressIndicator.adaptive()))),
+      error: (e, _) => AppCard(child: Text('$e')),
+      data: (x) => Row(children: [
+        Expanded(child: _tile(context, 'LONGEST',
+          x.longestKm == null ? '—' : '${unit.from(x.longestKm!).toStringAsFixed(0)} ${unit.label}',
+          x.longestQso?.call, Icons.straighten)),
+        const SizedBox(width: 12),
+        Expanded(child: _tile(context, 'BEST SIGNAL',
+          x.bestSnr == null ? '—' : (x.bestSnr! >= 0 ? '+${x.bestSnr}' : '${x.bestSnr}') + ' dB',
+          x.bestSnrQso?.call, Icons.trending_up)),
+        const SizedBox(width: 12),
+        Expanded(child: _tile(context, 'WEAKEST SIGNAL',
+          x.worstSnr == null ? '—' : (x.worstSnr! >= 0 ? '+${x.worstSnr}' : '${x.worstSnr}') + ' dB',
+          x.worstSnrQso?.call, Icons.trending_down)),
+      ]),
+    );
+  }
+
+  Widget _tile(BuildContext context, String label, String value, String? sub, IconData icon) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(icon, size: 12, color: c.subtle),
+            const SizedBox(width: 6),
+            Text(label, style: t.labelSmall),
+          ]),
+          const SizedBox(height: 6),
+          Text(value, style: t.headlineSmall),
+          if (sub != null) Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(sub, style: t.bodySmall?.copyWith(color: c.subtle)),
+          ),
+        ],
+      ),
     );
   }
 }

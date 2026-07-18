@@ -354,7 +354,20 @@ final qsoLoggedIngestProvider = Provider<void>((ref) {
   ref.listen(wsjtxMessagesProvider, (_, next) {
     next.whenData((m) {
       if (m is WsjtxQsoLogged) {
-        repo.insertFromWsjtx(m);
+        // Stamp the QSO with the current propagation snapshot so it's
+        // remembered forever, not just what hamqsl reports today. Also
+        // supply portable fallbacks from settings + a grid resolver so
+        // CB QSOs never leave the DB with an empty locator.
+        final solar = ref.read(solarDataProvider).valueOrNull;
+        final s = ref.read(settingsProvider);
+        final r = ref.read(callsignResolverProvider);
+        repo.insertFromWsjtx(
+          m,
+          extraFields: _solarSnapshotFields(solar, DateTime.now().toUtc()),
+          fallbackMyCall: s.myCall,
+          fallbackMyGrid: s.myGrid,
+          gridResolver: (call) => r.gridFor(call),
+        );
       } else if (m is WsjtxDecode) {
         final call = m.cqCall();
         final grid = m.cqGrid();
@@ -479,9 +492,16 @@ final adifTailProvider = Provider<AdifTailWatcher?>((ref) {
     // value is non-blocking: if the last fetch failed we simply skip the
     // enrichment for these records.
     final solarSnapshot = ref.read(solarDataProvider).valueOrNull;
+    final settings = ref.read(settingsProvider);
+    final resolver = ref.read(callsignResolverProvider);
     for (final r in e.records) {
       final enriched = _enrich(r, solar: solarSnapshot, ingestedAt: DateTime.now().toUtc());
-      await repo.insertFromAdif(enriched);
+      await repo.insertFromAdif(
+        enriched,
+        fallbackMyCall: settings.myCall,
+        fallbackMyGrid: settings.myGrid,
+        gridResolver: (call) => resolver.gridFor(call),
+      );
     }
     await prefs.setInt('adifOffset:$path', e.newOffset);
   });
@@ -498,16 +518,25 @@ final adifTailProvider = Provider<AdifTailWatcher?>((ref) {
 /// so subsequent re-exports round-trip cleanly.
 AdifRecord _enrich(AdifRecord src, {SolarData? solar, required DateTime ingestedAt}) {
   final f = Map<String, String>.from(src.fields);
-  f['app_qsobook_ingested_at'] = ingestedAt.toIso8601String();
-  if (solar != null) {
-    if (solar.sfi     != null) f['app_qsobook_sfi']     = solar.sfi!.toStringAsFixed(0);
-    if (solar.kIndex  != null) f['app_qsobook_k_index'] = solar.kIndex!.toStringAsFixed(1);
-    if (solar.aIndex  != null) f['app_qsobook_a_index'] = solar.aIndex!.toStringAsFixed(0);
-    if (solar.sunspots != null) f['app_qsobook_sunspots'] = solar.sunspots!.toString();
-    final cond = solar.twelveTenCondition(_isDaytimeUtc(ingestedAt) ? 'day' : 'night');
-    if (cond != null) f['app_qsobook_band_condition'] = cond;
-  }
+  f.addAll(_solarSnapshotFields(solar, ingestedAt));
   return AdifRecord(Map.unmodifiable(f));
+}
+
+/// Renders the current solar / propagation snapshot as a map of ADIF-style
+/// `app_qsobook_*` fields suitable for merging into either an [AdifRecord]
+/// or a UDP QSO's `raw_fields` JSON.
+Map<String, String> _solarSnapshotFields(SolarData? solar, DateTime ingestedAt) {
+  final f = <String, String>{
+    'app_qsobook_ingested_at': ingestedAt.toIso8601String(),
+  };
+  if (solar == null) return f;
+  if (solar.sfi      != null) f['app_qsobook_sfi']      = solar.sfi!.toStringAsFixed(0);
+  if (solar.kIndex   != null) f['app_qsobook_k_index']  = solar.kIndex!.toStringAsFixed(1);
+  if (solar.aIndex   != null) f['app_qsobook_a_index']  = solar.aIndex!.toStringAsFixed(0);
+  if (solar.sunspots != null) f['app_qsobook_sunspots'] = solar.sunspots!.toString();
+  final cond = solar.twelveTenCondition(_isDaytimeUtc(ingestedAt) ? 'day' : 'night');
+  if (cond != null) f['app_qsobook_band_condition'] = cond;
+  return f;
 }
 
 /// Rough day/night switch based on UTC hour. This is a proxy: hamqsl feeds
@@ -555,6 +584,32 @@ final rigsProvider     = StreamProvider<List<Rig>>((ref) => ref.watch(qsoRepoPro
 
 final needsReviewProvider = StreamProvider<List<Qso>>((ref) => ref.watch(qsoRepoProvider).watchNeedsReview());
 final needsReviewCountProvider = StreamProvider<int>((ref) => ref.watch(qsoRepoProvider).watchNeedsReviewCount());
+
+/// Cached set of every callsign already in our logbook. Drives the NEW-CQ
+/// badge on live map decodes — recomputes whenever the logbook stream
+/// emits (i.e. after every ingest).
+final workedCallsignsProvider = FutureProvider<Set<String>>((ref) async {
+  ref.watch(logbookProvider);
+  return ref.watch(qsoRepoProvider).workedCallsigns();
+});
+
+final statsExtrasProvider = FutureProvider<StatsExtras>((ref) async {
+  ref.watch(logbookProvider);
+  final s = ref.watch(settingsProvider);
+  final me = s.myGrid == null ? null : _gridToLatLngPublic(s.myGrid!);
+  return ref.watch(qsoRepoProvider).extras(
+        myLat: me?.$1, myLon: me?.$2,
+      );
+});
+
+(double, double)? _gridToLatLngPublic(String g) {
+  final gg = g.toUpperCase();
+  if (gg.length < 4) return null;
+  final f1 = gg.codeUnitAt(0) - 0x41, f2 = gg.codeUnitAt(1) - 0x41;
+  final s1 = gg.codeUnitAt(2) - 0x30, s2 = gg.codeUnitAt(3) - 0x30;
+  if (f1 < 0 || f1 > 17 || f2 < 0 || f2 > 17 || s1 < 0 || s1 > 9 || s2 < 0 || s2 > 9) return null;
+  return (-90 + f2 * 10 + s2 + 0.5, -180 + f1 * 20 + s1 * 2 + 1);
+}
 
 final allQsosProvider = FutureProvider<List<Qso>>((ref) async {
   // Rebuild whenever logbook changes.
@@ -608,6 +663,8 @@ final freqHistogramProvider = FutureProvider<Map<int, int>>((ref) async {
 
 final adifImportProvider = Provider<Future<int> Function(String)>((ref) {
   final repo = ref.watch(qsoRepoProvider);
+  final resolver = ref.watch(callsignResolverProvider);
+  final s = ref.watch(settingsProvider);
   return (String path) async {
     final file = File(path);
     if (!file.existsSync()) return 0;
@@ -615,7 +672,12 @@ final adifImportProvider = Provider<Future<int> Function(String)>((ref) {
     final records = AdifParser.parse(text);
     int n = 0;
     for (final r in records) {
-      final rows = await repo.insertFromAdif(r);
+      final rows = await repo.insertFromAdif(
+        r,
+        fallbackMyCall: s.myCall,
+        fallbackMyGrid: s.myGrid,
+        gridResolver: (call) => resolver.gridFor(call),
+      );
       if (rows > 0) n++;
     }
     return n;

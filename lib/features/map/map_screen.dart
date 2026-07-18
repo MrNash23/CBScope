@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -15,22 +16,24 @@ import '../../data/db/qso_repository.dart' show ReviewState;
 import '../../data/psk_reporter/psk_reporter_client.dart';
 import '../../providers/providers.dart';
 
-enum QsoAgeFilter { last24h, week, month, year, all }
+enum QsoAgeFilter { custom, last24h, week, month, year, all }
 
 extension QsoAgeFilterX on QsoAgeFilter {
   String get label => switch (this) {
+        QsoAgeFilter.custom  => 'Custom',
         QsoAgeFilter.last24h => 'Last 24 h',
-        QsoAgeFilter.week   => 'Last week',
-        QsoAgeFilter.month  => 'Last month',
-        QsoAgeFilter.year   => 'Last year',
-        QsoAgeFilter.all    => 'All time',
+        QsoAgeFilter.week    => 'Last week',
+        QsoAgeFilter.month   => 'Last month',
+        QsoAgeFilter.year    => 'Last year',
+        QsoAgeFilter.all     => 'All time',
       };
   Duration? get maxAge => switch (this) {
+        QsoAgeFilter.custom  => const Duration(hours: 24), // fallback, real value comes from slider
         QsoAgeFilter.last24h => const Duration(hours: 24),
-        QsoAgeFilter.week   => const Duration(days: 7),
-        QsoAgeFilter.month  => const Duration(days: 30),
-        QsoAgeFilter.year   => const Duration(days: 365),
-        QsoAgeFilter.all    => null,
+        QsoAgeFilter.week    => const Duration(days: 7),
+        QsoAgeFilter.month   => const Duration(days: 30),
+        QsoAgeFilter.year    => const Duration(days: 365),
+        QsoAgeFilter.all     => null,
       };
 }
 
@@ -50,6 +53,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   bool _showPskSpots = true;
   bool _filtersOpen = false;
   QsoAgeFilter _ageFilter = QsoAgeFilter.all;
+  int _ageCustomHours = 24; // used when _ageFilter == custom (1-720h)
   double _minSnr = -30; // dB
   Timer? _fadeTick;
 
@@ -78,13 +82,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final resolver = ref.watch(callsignResolverProvider);
     final pskSpots = ref.watch(pskSpotsProvider).valueOrNull ?? const <PskSpot>[];
     final pskLoading = ref.watch(pskSpotsProvider).isLoading;
+    final workedCalls = ref.watch(workedCallsignsProvider).valueOrNull ?? const <String>{};
     final qsoColor    = mySettings.qsoColor;
     final decodeColor = mySettings.decodeColor;
     final pskColor    = mySettings.pskColor;
     final meColor     = mySettings.meColor;
 
     final now = DateTime.now();
-    final ageCutoff = _ageFilter.maxAge == null ? null : now.subtract(_ageFilter.maxAge!);
+    final ageMaxDur = _ageFilter == QsoAgeFilter.custom
+        ? Duration(hours: _ageCustomHours)
+        : _ageFilter.maxAge;
+    final ageCutoff = ageMaxDur == null ? null : now.subtract(ageMaxDur);
 
     final qsoMarkers = <Marker>[];
     if (_showQsos) {
@@ -121,9 +129,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final distKm = myLatLng == null
             ? null
             : const Distance().as(LengthUnit.Kilometer, myLatLng, ll);
+        final isNewCq = d.decode.message.trim().startsWith('CQ ') &&
+            !workedCalls.contains(call.toUpperCase());
         decodeMarkers.add(Marker(
           point: ll,
-          width: 22, height: 22,
+          // Slightly larger marker + badge overhead when NEW CQ.
+          width: isNewCq ? 60 : 22, height: isNewCq ? 32 : 22,
           child: _DecodeMarker(
             call: call,
             grid: resolvedGrid,
@@ -134,6 +145,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             unit: unit,
             gridWasHinted: hintedGrid != null,
             color: decodeColor,
+            isNewCq: isNewCq,
           ),
         ));
         if (_showLines && myLatLng != null) {
@@ -271,15 +283,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               showMe: _showMe,
               showPskSpots: _showPskSpots,
               ageFilter: _ageFilter,
+              ageCustomHours: _ageCustomHours,
               minSnr: _minSnr,
               onChanged: (next) => setState(() {
-                _showQsos     = next.showQsos;
-                _showDecodes  = next.showDecodes;
-                _showLines    = next.showLines;
-                _showMe       = next.showMe;
-                _showPskSpots = next.showPskSpots;
-                _ageFilter    = next.ageFilter;
-                _minSnr       = next.minSnr;
+                _showQsos       = next.showQsos;
+                _showDecodes    = next.showDecodes;
+                _showLines      = next.showLines;
+                _showMe         = next.showMe;
+                _showPskSpots   = next.showPskSpots;
+                _ageFilter      = next.ageFilter;
+                _ageCustomHours = next.ageCustomHours;
+                _minSnr         = next.minSnr;
               }),
               onClose: () => setState(() => _filtersOpen = false),
             ),
@@ -297,11 +311,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       return TileLayer(
         urlTemplate: 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png',
         subdomains: const ['a', 'b', 'c', 'd'],
-        userAgentPackageName: 'net.xzgroup.cbscope',
+        userAgentPackageName: 'app.cbscope',
         tileProvider: NetworkTileProvider(),
         tileBuilder: (context, tileWidget, tile) {
           // Blend the dark tile with a green so the base map takes on the
-          // xzgroup #49FF7A hue while retaining structure.
+          // signature #49FF7A hue while retaining structure.
           return ColorFiltered(
             colorFilter: const ColorFilter.matrix(<double>[
               // R' — kept very low so nothing looks red-ish.
@@ -381,17 +395,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 class _FilterState {
   final bool showQsos, showDecodes, showLines, showMe, showPskSpots;
   final QsoAgeFilter ageFilter;
+  final int ageCustomHours;
   final double minSnr;
   const _FilterState({
     required this.showQsos, required this.showDecodes, required this.showLines,
     required this.showMe, required this.showPskSpots,
-    required this.ageFilter, required this.minSnr,
+    required this.ageFilter, required this.ageCustomHours, required this.minSnr,
   });
 }
 
 class _FilterPanel extends ConsumerWidget {
   final bool showQsos, showDecodes, showLines, showMe, showPskSpots;
   final QsoAgeFilter ageFilter;
+  final int ageCustomHours;
   final double minSnr;
   final ValueChanged<_FilterState> onChanged;
   final VoidCallback onClose;
@@ -403,6 +419,7 @@ class _FilterPanel extends ConsumerWidget {
     required this.showMe,
     required this.showPskSpots,
     required this.ageFilter,
+    required this.ageCustomHours,
     required this.minSnr,
     required this.onChanged,
     required this.onClose,
@@ -420,25 +437,36 @@ class _FilterPanel extends ConsumerWidget {
         border: Border.all(color: c.border),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 20, offset: const Offset(0, 6))],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.tune, size: 14, color: c.subtle),
-                  const SizedBox(width: 6),
-                  Text('FILTERS', style: t.labelSmall),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: onClose,
-                    child: Icon(Icons.close, size: 14, color: c.subtle),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header stays OUTSIDE the scroll view so the close X is always
+          // reachable and never obscured by the scrollbar gutter.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
+            child: Row(
+              children: [
+                Icon(Icons.tune, size: 14, color: c.subtle),
+                const SizedBox(width: 6),
+                Text('FILTERS', style: t.labelSmall),
+                const Spacer(),
+                InkWell(
+                  onTap: onClose,
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(Icons.close, size: 16, color: c.text),
                   ),
-                ],
-              ),
-              const SizedBox(height: 14),
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: c.border),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 22, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
               _section(context, 'Layers'),
               _switchRow(context, 'Logged QSOs',        showQsos,     (v) => _emit(showQsos: v)),
               _switchRow(context, 'Live decodes',       showDecodes,  (v) => _emit(showDecodes: v)),
@@ -506,6 +534,24 @@ class _FilterPanel extends ConsumerWidget {
                     _chipToggle(context, f.label, ageFilter == f, () => _emit(ageFilter: f)),
                 ],
               ),
+              if (ageFilter == QsoAgeFilter.custom) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Slider(
+                        value: ageCustomHours.toDouble().clamp(1, 720),
+                        min: 1, max: 720, divisions: 719,
+                        label: _humanHours(ageCustomHours),
+                        onChanged: (v) => _emit(ageCustomHours: v.round()),
+                      ),
+                    ),
+                    SizedBox(width: 72,
+                      child: Text(_humanHours(ageCustomHours),
+                          style: t.bodySmall, textAlign: TextAlign.right)),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
               _EnrichmentFilters(),
               const SizedBox(height: 16),
@@ -524,25 +570,35 @@ class _FilterPanel extends ConsumerWidget {
                     style: t.bodySmall, textAlign: TextAlign.right)),
                 ],
               ),
-            ],
+                ],
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
+  String _humanHours(int h) {
+    if (h < 24) return '$h h';
+    final d = h ~/ 24;
+    final rest = h % 24;
+    return rest == 0 ? '$d d' : '${d}d ${rest}h';
+  }
+
   void _emit({
     bool? showQsos, bool? showDecodes, bool? showLines, bool? showMe, bool? showPskSpots,
-    QsoAgeFilter? ageFilter, double? minSnr,
+    QsoAgeFilter? ageFilter, int? ageCustomHours, double? minSnr,
   }) {
     onChanged(_FilterState(
-      showQsos:     showQsos     ?? this.showQsos,
-      showDecodes:  showDecodes  ?? this.showDecodes,
-      showLines:    showLines    ?? this.showLines,
-      showMe:       showMe       ?? this.showMe,
-      showPskSpots: showPskSpots ?? this.showPskSpots,
-      ageFilter:    ageFilter    ?? this.ageFilter,
-      minSnr:       minSnr       ?? this.minSnr,
+      showQsos:       showQsos       ?? this.showQsos,
+      showDecodes:    showDecodes    ?? this.showDecodes,
+      showLines:      showLines      ?? this.showLines,
+      showMe:         showMe         ?? this.showMe,
+      showPskSpots:   showPskSpots   ?? this.showPskSpots,
+      ageFilter:      ageFilter      ?? this.ageFilter,
+      ageCustomHours: ageCustomHours ?? this.ageCustomHours,
+      minSnr:         minSnr         ?? this.minSnr,
     ));
   }
 
@@ -677,6 +733,8 @@ class _QsoTooltipCard extends StatelessWidget {
               if (qso.name != null && qso.name!.isNotEmpty)  _kv(context, 'Name', qso.name!),
               if (qso.country != null && qso.country!.isNotEmpty) _kv(context, 'Country', qso.country!),
               if (qso.comment != null && qso.comment!.isNotEmpty) _kv(context, 'Comment', qso.comment!),
+              if (qso.myGrid != null && qso.myGrid!.isNotEmpty) _kv(context, 'My QTH', qso.myGrid!),
+              _WeatherRow(rawFields: qso.rawFields),
               if (distanceKm != null) ...[
                 const Divider(height: 12),
                 Row(
@@ -724,6 +782,49 @@ class _QsoTooltipCard extends StatelessWidget {
   }
 }
 
+/// Reads solar/propagation fields out of a QSO's `raw_fields` JSON and
+/// renders a compact chip line inside the tooltip. Nothing shown if the
+/// record wasn't stamped with weather at ingest.
+class _WeatherRow extends StatelessWidget {
+  final String? rawFields;
+  const _WeatherRow({required this.rawFields});
+  @override
+  Widget build(BuildContext context) {
+    if (rawFields == null || rawFields!.isEmpty) return const SizedBox.shrink();
+    Map<String, dynamic>? m;
+    try { m = jsonDecode(rawFields!) as Map<String, dynamic>; } catch (_) { return const SizedBox.shrink(); }
+    final sfi  = m['app_qsobook_sfi'];
+    final k    = m['app_qsobook_k_index'];
+    final a    = m['app_qsobook_a_index'];
+    final ss   = m['app_qsobook_sunspots'];
+    final cond = m['app_qsobook_band_condition'];
+    if (sfi == null && k == null && a == null && ss == null && cond == null) {
+      return const SizedBox.shrink();
+    }
+    final parts = <String>[
+      if (sfi != null) 'SFI $sfi',
+      if (k   != null) 'K $k',
+      if (a   != null) 'A $a',
+      if (ss  != null) 'SS $ss',
+      if (cond != null) 'Band: $cond',
+    ];
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.wb_sunny_outlined, size: 12, color: c.subtle),
+          const SizedBox(width: 6),
+          Expanded(child: Text(parts.join('  ·  '),
+            style: t.labelSmall?.copyWith(color: c.subtle, fontWeight: FontWeight.w600))),
+        ],
+      ),
+    );
+  }
+}
+
 /// Enrichment filters (antenna / radio / review status / rating) rendered
 /// as a section inside the map filter panel. Mutates the shared
 /// [logbookFilterProvider] so the Logbook screen shows the same slice.
@@ -735,11 +836,9 @@ class _EnrichmentFilters extends ConsumerWidget {
     final f = ref.watch(logbookFilterProvider);
     final antennas = ref.watch(antennasProvider).valueOrNull ?? const [];
     final rigs     = ref.watch(rigsProvider).valueOrNull ?? const [];
-    final rState   = f.reviewState ?? ReviewState.any;
-
     void update({
-      int? antennaId, int? radioId, int? minRating, ReviewState? reviewState,
-      bool clearAntenna = false, bool clearRadio = false, bool clearMinRating = false, bool clearReview = false,
+      int? antennaId, int? radioId,
+      bool clearAntenna = false, bool clearRadio = false,
     }) {
       ref.read(logbookFilterProvider.notifier).state = (
         search: f.search,
@@ -747,8 +846,8 @@ class _EnrichmentFilters extends ConsumerWidget {
         mode: f.mode,
         antennaId: clearAntenna ? null : (antennaId ?? f.antennaId),
         radioId:   clearRadio   ? null : (radioId   ?? f.radioId),
-        minRating: clearMinRating ? null : (minRating ?? f.minRating),
-        reviewState: clearReview ? null : (reviewState ?? f.reviewState),
+        minRating: f.minRating,
+        reviewState: f.reviewState,
       );
     }
 
@@ -767,26 +866,12 @@ class _EnrichmentFilters extends ConsumerWidget {
           ),
         );
 
+    // Review status + rating filters intentionally live only on the Logbook
+    // screen — the map should stay a lightweight geo view.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('QSOs — REVIEW STATUS', style: t.labelSmall),
-        const SizedBox(height: 6),
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          chip('All',        rState == ReviewState.any,        () => update(clearReview: true)),
-          chip('Reviewed',   rState == ReviewState.reviewed,   () => update(reviewState: ReviewState.reviewed)),
-          chip('Unreviewed', rState == ReviewState.unreviewed, () => update(reviewState: ReviewState.unreviewed)),
-        ]),
-        const SizedBox(height: 10),
-        Text('QSOs — MIN RATING', style: t.labelSmall),
-        const SizedBox(height: 6),
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          chip('Any', f.minRating == null || f.minRating == 0, () => update(clearMinRating: true)),
-          for (int r = 1; r <= 5; r++)
-            chip('★' * r, f.minRating == r, () => update(minRating: r)),
-        ]),
         if (rigs.isNotEmpty) ...[
-          const SizedBox(height: 10),
           Text('QSOs — RADIO', style: t.labelSmall),
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 6, children: [
@@ -908,6 +993,7 @@ class _DecodeMarker extends StatelessWidget {
   final DistanceUnit unit;
   final bool gridWasHinted;
   final Color color;
+  final bool isNewCq;
   const _DecodeMarker({
     required this.call,
     required this.grid,
@@ -918,12 +1004,14 @@ class _DecodeMarker extends StatelessWidget {
     required this.unit,
     required this.gridWasHinted,
     required this.color,
+    required this.isNewCq,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final tooltip = StringBuffer()
+      ..write(isNewCq ? '[NEW CQ] ' : '')
       ..write(call)
       ..write('  ·  ')
       ..write(grid)
@@ -937,22 +1025,38 @@ class _DecodeMarker extends StatelessWidget {
         ..write('\n')
         ..write('${unit.from(distanceKm!).toStringAsFixed(0)} ${unit.label}');
     }
+    final dot = Container(
+      width: 10, height: 10,
+      decoration: BoxDecoration(
+        color: color.withOpacity(alpha),
+        shape: BoxShape.circle,
+        border: gridWasHinted
+            ? null
+            : Border.all(color: Colors.white.withOpacity(0.9 * alpha), width: 1.4),
+        boxShadow: [BoxShadow(color: color.withOpacity(0.6 * alpha), blurRadius: 8, spreadRadius: 2)],
+      ),
+    );
     return Tooltip(
       message: tooltip.toString(),
       waitDuration: const Duration(milliseconds: 250),
-      child: Center(
-        child: Container(
-          width: 10, height: 10,
-          decoration: BoxDecoration(
-            color: color.withOpacity(alpha),
-            shape: BoxShape.circle,
-            border: gridWasHinted
-                ? null
-                : Border.all(color: Colors.white.withOpacity(0.9 * alpha), width: 1.4),
-            boxShadow: [BoxShadow(color: color.withOpacity(0.6 * alpha), blurRadius: 8, spreadRadius: 2)],
-          ),
-        ),
-      ),
+      child: isNewCq
+          ? Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: c.success.withOpacity(0.90 * alpha),
+                  border: Border.all(color: Colors.white.withOpacity(0.9 * alpha), width: 0.8),
+                ),
+                child: Text('NEW CQ',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900,
+                          letterSpacing: 0.6,
+                        )),
+              ),
+              const SizedBox(height: 3),
+              dot,
+            ])
+          : Center(child: dot),
     );
   }
 }
