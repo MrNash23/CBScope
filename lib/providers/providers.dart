@@ -139,25 +139,25 @@ enum MapStyle { regular, cbscopeRetro }
 /// [AppSettings.pskSpotCustomMinutes] (1-60 min slider).
 enum PskSpotWindow { custom, h1, h6, h24, d7 }
 
-/// Default marker colors — bright, distinct, retro-terminal palette.
+/// Default marker colors — Tron-flavoured neon on the dark map.
 class MarkerColors {
-  static const qso    = Color(0xFF49FF7A); // mint green (accent)
+  static const qso    = Color(0xFF00E5FF); // electric cyan (accent)
   static const decode = Color(0xFFFFB000); // amber
   static const psk    = Color(0xFFFF00AA); // magenta
-  static const me     = Color(0xFF00FFCC); // teal (secondary)
+  static const me     = Color(0xFF00FF88); // bright green (my station stands out)
 }
 
 /// Preset palette shown in the color picker. Bright and distinct for a
 /// dark map background.
 const kMarkerPalette = <Color>[
-  Color(0xFF49FF7A), // mint
-  Color(0xFF00FFCC), // teal
+  Color(0xFF00E5FF), // electric cyan
+  Color(0xFF4DE0FF), // ice cyan
+  Color(0xFF00FF88), // neon green
   Color(0xFFFFB000), // amber
+  Color(0xFFFF6A00), // Tron orange (opposing signal)
   Color(0xFFFF00AA), // magenta
   Color(0xFFFF3B4E), // red
-  Color(0xFF4AA3FF), // sky
   Color(0xFFB565FF), // purple
-  Color(0xFFFFE44D), // yellow
   Color(0xFFFFFFFF), // white
 ];
 

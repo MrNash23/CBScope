@@ -464,17 +464,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         userAgentPackageName: 'app.cbscope',
         tileProvider: NetworkTileProvider(),
         tileBuilder: (context, tileWidget, tile) {
-          // Blend the dark tile with a green so the base map takes on the
-          // signature #49FF7A hue while retaining structure.
+          // Blend the dark tile with cyan so the base map takes on the
+          // Tron #00E5FF hue while retaining road/label structure.
           return ColorFiltered(
             colorFilter: const ColorFilter.matrix(<double>[
-              // R' — kept very low so nothing looks red-ish.
-              0.02, 0.35, 0.02, 0,  2,
-              // G' — punchy: bright pixels amplify to near-mint, offset adds
-              // an overall glow so land/water separation is legible.
-              0.20, 1.55, 0.20, 0, 18,
-              // B' — small residue for a hint of teal; kills warm cast.
-              0.06, 0.40, 0.06, 0,  4,
+              // R' — kill red so nothing looks warm.
+              0.02, 0.02, 0.02, 0,  0,
+              // G' — moderate boost, contributes to cyan.
+              0.12, 0.90, 0.35, 0, 14,
+              // B' — brightest channel, pushes the whole map into cyan.
+              0.15, 0.55, 1.10, 0, 22,
               0,    0,    0,    1,  0,
             ]),
             child: tileWidget,

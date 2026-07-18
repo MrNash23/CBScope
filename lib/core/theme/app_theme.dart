@@ -10,36 +10,39 @@ class AppTheme {
   // Menlo ships with macOS; Consolas on Windows; DejaVu Sans Mono on most Linux.
   static const _mono = 'Menlo';
 
-  // CRT-style mint-green on near-black.
-  static const _green    = Color(0xFF49FF7A);
-  static const _teal     = Color(0xFF00FFCC);
-  static const _paleFg   = Color(0xFFC9FFCF);
-  static const _bgDark   = Color(0xFF050805);
+  // Tron-inspired electric cyan on deep blue-black.
+  static const _cyan     = Color(0xFF00E5FF);
+  static const _cyanSoft = Color(0xFF4DE0FF);
+  static const _paleFg   = Color(0xFFE0F7FA);
+  static const _bgDark   = Color(0xFF04070A);
+  // Reserve green for "success" states so a green pill still reads as OK
+  // when a page is otherwise blue/cyan.
+  static const _tronGreen = Color(0xFF00FF88);
 
   static ThemeData dark() => _base(
         brightness: Brightness.dark,
         surface: _bgDark,
-        card:    const Color(0xFF0A120C),
-        border:  const Color(0xFF1F4A2A),
+        card:    const Color(0xFF0A1218),
+        border:  const Color(0xFF1F4A5A),
         text:    _paleFg,
-        subtle:  const Color(0xFF6EA07A),
-        accent:  _green,
-        secondary: _teal,
-        success: _green,
+        subtle:  const Color(0xFF6EA0B8),
+        accent:  _cyan,
+        secondary: _cyanSoft,
+        success: _tronGreen,
         warning: const Color(0xFFFFB000),
         danger:  const Color(0xFFFF3B4E),
       );
 
   static ThemeData light() => _base(
         brightness: Brightness.light,
-        surface: const Color(0xFFF0F2EE),
-        card:    const Color(0xFFFFFFFC),
-        border:  const Color(0xFF2E5A3A),
-        text:    const Color(0xFF071807),
-        subtle:  const Color(0xFF3E6247),
-        accent:  const Color(0xFF00794A),
-        secondary: const Color(0xFF00695C),
-        success: const Color(0xFF00794A),
+        surface: const Color(0xFFEDF3F5),
+        card:    const Color(0xFFFFFFFF),
+        border:  const Color(0xFF2E5A6A),
+        text:    const Color(0xFF061218),
+        subtle:  const Color(0xFF3E606E),
+        accent:  const Color(0xFF00778C),
+        secondary: const Color(0xFF006B7A),
+        success: const Color(0xFF00694A),
         warning: const Color(0xFF9E5A00),
         danger:  const Color(0xFFB80028),
       );
