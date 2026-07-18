@@ -12,6 +12,7 @@ import '../../data/adif/adif_parser.dart';
 import '../../data/db/database.dart';
 import '../../data/db/qso_repository.dart';
 import '../../providers/providers.dart';
+import '../station/station_profile_sheet.dart';
 
 class LogbookScreen extends ConsumerStatefulWidget {
   const LogbookScreen({super.key});
@@ -234,7 +235,9 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
             itemCount: rows.length,
             itemBuilder: (context, i) {
               final q = rows[i];
-              return Container(
+              return InkWell(
+                onTap: () => showStationProfile(context, q.call),
+              child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   border: Border(bottom: BorderSide(color: c.border.withOpacity(0.6))),
@@ -251,6 +254,7 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
                     _v(q.comment ?? '', 260),
                   ],
                 ),
+              ),
               );
             },
           ),

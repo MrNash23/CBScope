@@ -12,6 +12,105 @@ import '../../core/widgets/color_swatch_picker.dart';
 import '../../data/db/database.dart';
 import '../../providers/providers.dart';
 
+/// Nuke-from-orbit reset. Wipes the Drift DB, the SharedPreferences plist,
+/// and any cached files under Application Support so the app comes up in
+/// exactly the same state as a fresh install. Requires a confirmation
+/// dialog because it is irreversible.
+class _DangerZoneSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      color: c.card,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.warning_amber_rounded, size: 14, color: c.danger),
+            const SizedBox(width: 6),
+            Text('DANGER ZONE', style: t.labelSmall?.copyWith(color: c.danger)),
+          ]),
+          const SizedBox(height: 10),
+          Text(
+            'Reset the app to a fresh install. Deletes every QSO, all equipment, '
+            'the callsign-grid cache, PSK Reporter cache, and every setting you '
+            'have entered. This cannot be undone.',
+            style: t.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            OutlinedButton.icon(
+              icon: Icon(Icons.delete_forever, size: 14, color: c.danger),
+              label: Text('Reset all data…', style: TextStyle(color: c.danger)),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: c.danger),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              onPressed: () => _confirmAndReset(context, ref),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmAndReset(BuildContext context, WidgetRef ref) async {
+    final c = context.colors;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: c.card,
+        title: Text('Reset all data?',
+            style: Theme.of(context).textTheme.headlineSmall),
+        content: Text(
+          'Everything — QSOs, equipment, callsign cache, PSK cache, and all '
+          'settings — will be permanently deleted. Continue?',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: c.danger),
+            child: const Text('DELETE EVERYTHING'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _doReset(context, ref);
+  }
+
+  Future<void> _doReset(BuildContext context, WidgetRef ref) async {
+    // 1) Wipe every table.
+    final db = ref.read(dbProvider);
+    await db.delete(db.qsos).go();
+    await db.delete(db.callsignGrids).go();
+    await db.delete(db.antennas).go();
+    await db.delete(db.rigs).go();
+    await db.delete(db.settings).go();
+    await db.delete(db.pskSpotsCache).go();
+    // 2) Wipe SharedPreferences (settings live here).
+    final prefs = ref.read(prefsProvider).requireValue;
+    await prefs.clear();
+    // 3) Force every provider to rebuild so the UI reflects a fresh install.
+    // ignore: unused_result
+    ref.invalidate(settingsProvider);
+    // ignore: unused_result
+    ref.invalidate(logbookProvider);
+    // ignore: unused_result
+    ref.invalidate(needsReviewCountProvider);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('App reset. Restart CBScope to start fresh.'),
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: 6),
+    ));
+  }
+}
+
 /// Full CSV export of the local logbook — a personal backup that stays
 /// forward-compatible as we add more datapoints.
 class _BackupSection extends ConsumerWidget {
@@ -346,6 +445,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _EquipmentSection(),
           const SizedBox(height: 16),
           _BackupSection(),
+          const SizedBox(height: 16),
+          _DangerZoneSection(),
           const SizedBox(height: 16),
           _group('Map style', [
             Padding(

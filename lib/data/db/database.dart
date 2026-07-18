@@ -88,13 +88,32 @@ class Settings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [Qsos, Settings, CallsignGrids, Antennas, Rigs])
+/// PSK Reporter spot cache — persisted so the map still has data when
+/// retrieve.pskreporter.info is temporarily unavailable (503 spikes,
+/// network hiccups, rate limits). We keep spots for 7 days.
+class PskSpotsCache extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get myCall => text()();
+  TextColumn get otherCall => text()();
+  TextColumn get otherGrid => text()();
+  /// 'sent' or 'received' (which side of the report we're on).
+  TextColumn get direction => text()();
+  DateTimeColumn get at => dateTime()();
+  IntColumn get freqHz => integer()();
+  IntColumn get snr => integer()();
+  TextColumn get mode => text()();
+  DateTimeColumn get fetchedAt => dateTime().withDefault(currentDateAndTime)();
+  /// Deduplication key: (myCall, otherCall, direction, at, freqHz).
+  TextColumn get dedupKey => text().unique()();
+}
+
+@DriftDatabase(tables: [Qsos, Settings, CallsignGrids, Antennas, Rigs, PskSpotsCache])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -112,6 +131,9 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(qsos, qsos.personalNotes);
             await m.addColumn(qsos, qsos.rating);
             await m.addColumn(qsos, qsos.reviewedAt);
+          }
+          if (from < 4) {
+            await m.createTable(pskSpotsCache);
           }
         },
       );

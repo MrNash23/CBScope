@@ -73,10 +73,124 @@ class StatsScreen extends ConsumerWidget {
               child: const DistancePolarChart(),
             ),
           ),
+          const SizedBox(height: 16),
+          const _EquipmentComparisonTable(),
         ],
       ),
     );
   }
+}
+
+/// Equipment performance comparison — each radio + antenna row shows QSO
+/// count, unique 4-char grids worked, unique countries, average distance
+/// and best DX (with the callsign that scored it).
+class _EquipmentComparisonTable extends ConsumerWidget {
+  const _EquipmentComparisonTable();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    final unit = ref.watch(settingsProvider).distanceUnit;
+    final async = ref.watch(equipmentStatsProvider);
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: async.when(
+        loading: () => const SizedBox(height: 80, child: Center(child: CircularProgressIndicator.adaptive())),
+        error: (e, _) => Padding(padding: const EdgeInsets.all(16), child: Text('$e')),
+        data: (rows) {
+          if (rows.isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('EQUIPMENT PERFORMANCE', style: t.labelSmall),
+                  const SizedBox(height: 8),
+                  Text('Tag your QSOs in Review with a radio and antenna to fill this table.',
+                      style: t.bodySmall),
+                ]),
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(color: c.surface,
+                    border: Border(bottom: BorderSide(color: c.border))),
+                child: Row(children: [
+                  Icon(Icons.equalizer, size: 12, color: c.subtle),
+                  const SizedBox(width: 6),
+                  Text('EQUIPMENT PERFORMANCE', style: t.labelSmall),
+                ]),
+              ),
+              // Header row
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                child: Row(children: [
+                  _h(context, 'Equipment', 190),
+                  _h(context, 'Kind', 60),
+                  _h(context, 'QSOs', 55, alignRight: true),
+                  _h(context, 'Grids', 55, alignRight: true),
+                  _h(context, 'Countries', 75, alignRight: true),
+                  _h(context, 'Avg dist', 80, alignRight: true),
+                  _h(context, 'Best DX', 130, alignRight: true),
+                  _h(context, 'Avg RST', 65, alignRight: true),
+                ]),
+              ),
+              Container(height: 1, color: c.border),
+              for (int i = 0; i < rows.length; i++)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    border: i == rows.length - 1
+                        ? null
+                        : Border(bottom: BorderSide(color: c.border.withOpacity(0.5))),
+                  ),
+                  child: Row(children: [
+                    _v(context, rows[i].name, 190, bold: true),
+                    _v(context, rows[i].kind, 60),
+                    _v(context, '${rows[i].qsoCount}', 55, alignRight: true),
+                    _v(context, '${rows[i].uniqueGrids}', 55, alignRight: true),
+                    _v(context, '${rows[i].uniqueCountries}', 75, alignRight: true),
+                    _v(context, rows[i].avgDistanceKm == null
+                        ? '—'
+                        : '${unit.from(rows[i].avgDistanceKm!).toStringAsFixed(0)} ${unit.label}',
+                        80, alignRight: true),
+                    _v(context, rows[i].bestDxKm == null
+                        ? '—'
+                        : '${unit.from(rows[i].bestDxKm!).toStringAsFixed(0)} ${unit.label}'
+                            '${rows[i].bestDxCall != null ? '  ${rows[i].bestDxCall}' : ''}',
+                        130, alignRight: true),
+                    _v(context, rows[i].avgRstRcvd == null
+                        ? '—'
+                        : (rows[i].avgRstRcvd! >= 0 ? '+' : '')
+                            + rows[i].avgRstRcvd!.toStringAsFixed(0) + ' dB',
+                        65, alignRight: true),
+                  ]),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _h(BuildContext context, String s, double w, {bool alignRight = false}) => SizedBox(
+        width: w,
+        child: Text(s.toUpperCase(),
+            style: Theme.of(context).textTheme.labelSmall,
+            textAlign: alignRight ? TextAlign.right : TextAlign.left),
+      );
+  Widget _v(BuildContext context, String s, double w, {bool bold = false, bool alignRight = false}) => SizedBox(
+        width: w,
+        child: Text(s,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: bold ? FontWeight.w700 : null,
+              fontFamily: alignRight ? 'Menlo' : null,
+            ),
+            textAlign: alignRight ? TextAlign.right : TextAlign.left,
+            maxLines: 1, overflow: TextOverflow.ellipsis),
+      );
 }
 
 class _DayBarChart extends StatelessWidget {

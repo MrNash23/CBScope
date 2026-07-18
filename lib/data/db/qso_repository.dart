@@ -11,6 +11,38 @@ import 'database.dart';
 
 enum ReviewState { any, reviewed, unreviewed }
 
+class EquipmentStat {
+  final String name;
+  final String kind; // 'Radio' | 'Antenna'
+  final int qsoCount;
+  final int uniqueGrids;
+  final int uniqueCountries;
+  final double? avgDistanceKm;
+  final double? bestDxKm;
+  final String? bestDxCall;
+  final double? avgRstRcvd;
+  const EquipmentStat({
+    required this.name, required this.kind,
+    required this.qsoCount, required this.uniqueGrids, required this.uniqueCountries,
+    this.avgDistanceKm, this.bestDxKm, this.bestDxCall, this.avgRstRcvd,
+  });
+}
+
+class _EquipAgg {
+  final String label;
+  final String kind;
+  int qsoCount = 0;
+  final Set<String> uniqueGrids = {};
+  final Set<String> uniqueCountries = {};
+  double sumDist = 0;
+  int distCount = 0;
+  double bestDx = 0;
+  String? bestDxCall;
+  int sumRst = 0;
+  int rstCount = 0;
+  _EquipAgg({required this.label, required this.kind});
+}
+
 class StatsExtras {
   final int? bestSnr;
   final Qso? bestSnrQso;
@@ -413,6 +445,113 @@ class QsoRepository {
       'SELECT $column AS k, COUNT(*) AS c FROM qsos GROUP BY k ORDER BY c DESC',
     ).get();
     return {for (final r in rows) (r.read<String?>('k') ?? 'Unknown'): r.read<int>('c')};
+  }
+
+  // ---------------- PSK Reporter spot cache (7-day rolling) ----------------
+
+  Future<void> cachePskSpots(String myCall, String direction, Iterable<({
+    String otherCall, String otherGrid, DateTime at, int freqHz, int snr, String mode,
+  })> spots) async {
+    // Prune anything older than 7 days first — keeps the table bounded.
+    final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+    await (db.delete(db.pskSpotsCache)..where((t) => t.fetchedAt.isSmallerThanValue(cutoff))).go();
+    await db.batch((b) {
+      for (final s in spots) {
+        final key = '${myCall.toUpperCase()}|${s.otherCall.toUpperCase()}|$direction|${s.at.millisecondsSinceEpoch}|${s.freqHz}';
+        b.insert(db.pskSpotsCache, PskSpotsCacheCompanion.insert(
+          myCall: myCall.toUpperCase(),
+          otherCall: s.otherCall.toUpperCase(),
+          otherGrid: s.otherGrid.toUpperCase(),
+          direction: direction,
+          at: s.at,
+          freqHz: s.freqHz,
+          snr: s.snr,
+          mode: s.mode,
+          dedupKey: key,
+        ), mode: InsertMode.insertOrIgnore);
+      }
+    });
+  }
+
+  /// Read cached spots for [myCall] within the [since] window regardless of
+  /// [direction] ('sent', 'received', or `null` for both).
+  Future<List<PskSpotsCacheData>> readCachedPskSpots({
+    required String myCall,
+    required Duration since,
+    String? direction,
+  }) async {
+    final now = DateTime.now().toUtc();
+    final cutoff = now.subtract(since);
+    final q = db.select(db.pskSpotsCache)
+      ..where((t) => t.myCall.equals(myCall.toUpperCase()) & t.at.isBiggerOrEqualValue(cutoff));
+    if (direction != null) q.where((t) => t.direction.equals(direction));
+    q.orderBy([(t) => OrderingTerm.desc(t.at)]);
+    return q.get();
+  }
+
+  Future<List<Qso>> qsosByCall(String call) async {
+    final s = call.toUpperCase();
+    return (db.select(db.qsos)
+          ..where((t) => t.call.equals(s))
+          ..orderBy([(t) => OrderingTerm.desc(t.timeOn)]))
+        .get();
+  }
+
+  /// Equipment-comparison stats. Groups the current logbook by radio + by
+  /// antenna and rolls up: QSO count, unique 4-char grids, unique countries,
+  /// avg distance from [myLat]/[myLon], and best DX distance.
+  Future<List<EquipmentStat>> equipmentStats({
+    required double? myLat, required double? myLon,
+  }) async {
+    final antennas = {for (final a in await db.select(db.antennas).get()) a.id: a.name};
+    final rigs     = {for (final r in await db.select(db.rigs).get()) r.id: r.name};
+    final qsos = await all();
+
+    final Map<String, _EquipAgg> aggs = {};
+    void tally(String key, String label, String kind, Qso q) {
+      final agg = aggs.putIfAbsent(key, () => _EquipAgg(label: label, kind: kind));
+      agg.qsoCount += 1;
+      if (q.gridsquare != null && q.gridsquare!.length >= 4) {
+        agg.uniqueGrids.add(q.gridsquare!.substring(0, 4).toUpperCase());
+      }
+      if (q.country != null && q.country!.isNotEmpty) agg.uniqueCountries.add(q.country!);
+      if (myLat != null && myLon != null && q.gridsquare != null && q.gridsquare!.length >= 4) {
+        final ll = _gridToLatLng(q.gridsquare!);
+        if (ll != null) {
+          final d = _greatCircleKm(myLat, myLon, ll.$1, ll.$2);
+          agg.sumDist += d;
+          agg.distCount += 1;
+          if (d > agg.bestDx) { agg.bestDx = d; agg.bestDxCall = q.call; }
+        }
+      }
+      final r = q.rstRcvd?.trim();
+      if (r != null && r.isNotEmpty) {
+        final n = int.tryParse(r.replaceAll(RegExp(r'[^-0-9]'), ''));
+        if (n != null) { agg.sumRst += n; agg.rstCount += 1; }
+      }
+    }
+
+    for (final q in qsos) {
+      if (q.radioId != null) {
+        tally('rig:${q.radioId}', rigs[q.radioId!] ?? '(deleted)', 'Radio', q);
+      }
+      if (q.antennaId != null) {
+        tally('ant:${q.antennaId}', antennas[q.antennaId!] ?? '(deleted)', 'Antenna', q);
+      }
+    }
+
+    return aggs.values.map((a) => EquipmentStat(
+      name: a.label,
+      kind: a.kind,
+      qsoCount: a.qsoCount,
+      uniqueGrids: a.uniqueGrids.length,
+      uniqueCountries: a.uniqueCountries.length,
+      avgDistanceKm: a.distCount > 0 ? a.sumDist / a.distCount : null,
+      bestDxKm: a.bestDx == 0 ? null : a.bestDx,
+      bestDxCall: a.bestDxCall,
+      avgRstRcvd: a.rstCount > 0 ? a.sumRst / a.rstCount : null,
+    )).toList()
+      ..sort((x, y) => y.qsoCount.compareTo(x.qsoCount));
   }
 
   /// Unique callsigns in the logbook. Cheap lookup for NEW-CQ detection on

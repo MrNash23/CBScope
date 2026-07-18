@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/util/greyline.dart';
 import '../../core/util/maidenhead.dart';
 import '../../core/widgets/app_card.dart';
 import '../../core/widgets/propagation_card.dart';
@@ -15,6 +16,7 @@ import '../../data/db/database.dart';
 import '../../data/db/qso_repository.dart' show ReviewState;
 import '../../data/psk_reporter/psk_reporter_client.dart';
 import '../../providers/providers.dart';
+import '../station/station_profile_sheet.dart';
 
 enum QsoAgeFilter { custom, last24h, week, month, year, all }
 
@@ -51,21 +53,30 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   bool _showLines = true;
   bool _showMe = true;
   bool _showPskSpots = true;
+  bool _showGreyline = false;
   bool _filtersOpen = false;
   QsoAgeFilter _ageFilter = QsoAgeFilter.all;
-  int _ageCustomHours = 24; // used when _ageFilter == custom (1-720h)
+  int _ageCustomMinutes = 15; // used when _ageFilter == custom (1-60 min)
   double _minSnr = -30; // dB
+
+  // Time-replay: when active, all layers are filtered to "before or at _replayAt".
+  bool _replayEnabled = false;
+  DateTime _replayAt = DateTime.now().toUtc();
+  int _replaySpanHours = 24;
+  Timer? _replayAutoplay;
   Timer? _fadeTick;
 
   @override
   void initState() {
     super.initState();
-    _fadeTick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+    // 200 ms tick: drives both the live-decode fade AND the flowing PSK dots.
+    _fadeTick = Timer.periodic(const Duration(milliseconds: 200), (_) => setState(() {}));
   }
 
   @override
   void dispose() {
     _fadeTick?.cancel();
+    _replayAutoplay?.cancel();
     super.dispose();
   }
 
@@ -89,15 +100,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final meColor     = mySettings.meColor;
 
     final now = DateTime.now();
+    // Replay "now" is either the wallclock or the timeline scrubber value.
+    final effectiveNow = _replayEnabled ? _replayAt : now;
     final ageMaxDur = _ageFilter == QsoAgeFilter.custom
-        ? Duration(hours: _ageCustomHours)
+        ? Duration(minutes: _ageCustomMinutes)
         : _ageFilter.maxAge;
-    final ageCutoff = ageMaxDur == null ? null : now.subtract(ageMaxDur);
+    final ageCutoff = ageMaxDur == null ? null : effectiveNow.subtract(ageMaxDur);
 
     final qsoMarkers = <Marker>[];
     if (_showQsos) {
       for (final q in qsos) {
+        // Age window (min <= timeOn <= max).
         if (ageCutoff != null && q.timeOn.isBefore(ageCutoff)) continue;
+        if (_replayEnabled && q.timeOn.isAfter(effectiveNow)) continue;
         final ll = gridToLatLng(q.gridsquare);
         if (ll == null) continue;
         final distKm = myLatLng == null
@@ -118,6 +133,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final call = d.decode.cqCall();
         if (call == null) continue;
         if (d.decode.snr < _minSnr) continue;
+        // Replay hides decodes newer than the scrubber.
+        if (_replayEnabled && d.receivedAt.toUtc().isAfter(effectiveNow)) continue;
         final hintedGrid = d.decode.cqGrid();
         final resolvedGrid = resolver.gridFor(call, seenGridHint: hintedGrid);
         if (resolvedGrid == null) continue;
@@ -194,8 +211,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           children: [
             _buildTileLayer(mySettings.mapStyle),
             if (mySettings.mapStyle == MapStyle.cbscopeRetro) _RetroMapOverlay(),
+            if (_showGreyline) _GreylineLayer(),
             if (decodeLines.isNotEmpty || pskLines.isNotEmpty)
               PolylineLayer(polylines: [...decodeLines, ...pskLines]),
+            // Animated dots flowing along each PSK great-circle line.
+            if (_showPskSpots && myLatLng != null && pskMarkers.isNotEmpty)
+              MarkerLayer(markers: _flowingPskDots(myLatLng, pskSpots, pskColor)),
+            // Coverage footprint: when the user filters by radio / antenna,
+            // draw a translucent circle at their farthest QSO distance.
+            if (myLatLng != null && (ref.watch(logbookFilterProvider).radioId != null || ref.watch(logbookFilterProvider).antennaId != null))
+              _coverageLayer(qsos, myLatLng, qsoColor),
             MarkerLayer(markers: [...qsoMarkers, ...pskMarkers, ...decodeMarkers]),
             if (_showMe && myLatLng != null)
               MarkerLayer(markers: [
@@ -218,9 +243,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ],
         ),
 
+        // WSJT connection indicator, upper-left corner, above the toolbar.
+        Positioned(
+          top: 16, left: 16,
+          child: _WsjtStatusPill(),
+        ),
         // Top toolbar: quick counts + filter open + zoom
         Positioned(
-          top: 16, left: 16, right: 16,
+          top: 56, left: 16, right: 16,
           child: Row(
             children: [
               _pill(
@@ -256,6 +286,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 active: _filtersOpen,
                 onTap: () => setState(() => _filtersOpen = !_filtersOpen),
               ),
+              const SizedBox(width: 8),
+              _pill(
+                icon: Icons.history,
+                color: c.text,
+                label: _replayEnabled
+                    ? 'Replay ${_shortHm(_replayAt)}'
+                    : 'Replay',
+                active: _replayEnabled,
+                onTap: () {
+                  setState(() {
+                    _replayEnabled = !_replayEnabled;
+                    if (_replayEnabled) {
+                      _replayAt = DateTime.now().toUtc();
+                    } else {
+                      _replayAutoplay?.cancel();
+                    }
+                  });
+                },
+              ),
               const Spacer(),
               _iconButton(Icons.zoom_out, () => _map.move(_map.camera.center, _map.camera.zoom - 1)),
               const SizedBox(width: 6),
@@ -264,11 +313,49 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
         ),
 
-        // Bottom-left: compact propagation strip
-        Positioned(
-          left: 16, bottom: 16, width: 360,
-          child: const PropagationCard(compact: true),
-        ),
+        // Bottom-left: compact propagation strip (hidden while replay bar is up
+        // so the two don't collide at the bottom of the map).
+        if (!_replayEnabled)
+          Positioned(
+            left: 16, bottom: 16, width: 360,
+            child: const PropagationCard(compact: true),
+          ),
+
+        // Bottom: time-replay scrubber
+        if (_replayEnabled)
+          Positioned(
+            left: 16, right: 16, bottom: 16,
+            child: _ReplayBar(
+              at: _replayAt,
+              spanHours: _replaySpanHours,
+              autoplay: _replayAutoplay != null,
+              onSeek: (dt) => setState(() => _replayAt = dt),
+              onSpanChanged: (h) => setState(() => _replaySpanHours = h),
+              onPlayToggle: () {
+                setState(() {
+                  if (_replayAutoplay != null) {
+                    _replayAutoplay!.cancel();
+                    _replayAutoplay = null;
+                  } else {
+                    _replayAutoplay = Timer.periodic(const Duration(milliseconds: 200), (_) {
+                      final now = DateTime.now().toUtc();
+                      final start = now.subtract(Duration(hours: _replaySpanHours));
+                      // Step 1% of the span per tick; wrap when we hit "now".
+                      final stepMs = (Duration(hours: _replaySpanHours).inMilliseconds * 0.01).round();
+                      var next = _replayAt.add(Duration(milliseconds: stepMs));
+                      if (next.isAfter(now)) next = start;
+                      setState(() => _replayAt = next);
+                    });
+                  }
+                });
+              },
+              onClose: () => setState(() {
+                _replayEnabled = false;
+                _replayAutoplay?.cancel();
+                _replayAutoplay = null;
+              }),
+            ),
+          ),
 
         // Right-side sliding filter panel
         Positioned(
@@ -282,8 +369,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               showLines: _showLines,
               showMe: _showMe,
               showPskSpots: _showPskSpots,
+              showGreyline: _showGreyline,
               ageFilter: _ageFilter,
-              ageCustomHours: _ageCustomHours,
+              ageCustomMinutes: _ageCustomMinutes,
               minSnr: _minSnr,
               onChanged: (next) => setState(() {
                 _showQsos       = next.showQsos;
@@ -291,8 +379,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 _showLines      = next.showLines;
                 _showMe         = next.showMe;
                 _showPskSpots   = next.showPskSpots;
+                _showGreyline   = next.showGreyline;
                 _ageFilter      = next.ageFilter;
-                _ageCustomHours = next.ageCustomHours;
+                _ageCustomMinutes = next.ageCustomMinutes;
                 _minSnr         = next.minSnr;
               }),
               onClose: () => setState(() => _filtersOpen = false),
@@ -301,6 +390,67 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ),
       ],
     );
+  }
+
+  /// Position three flowing dots per PSK spot along the great-circle path,
+  /// direction indicates data flow ("sent" = *my* signal moving TO the
+  /// receiver; "received" = the other station's signal moving TO me).
+  List<Marker> _flowingPskDots(LatLng me, List<PskSpot> spots, Color color) {
+    final markers = <Marker>[];
+    // 0.0..1.0 phase that advances ~0.03/second.
+    final t = (DateTime.now().millisecondsSinceEpoch % 3000) / 3000.0;
+    for (final s in spots) {
+      final other = gridToLatLng(s.otherGrid);
+      if (other == null) continue;
+      final forward = s.direction == PskDirection.sent; // me → other
+      for (int i = 0; i < 3; i++) {
+        double frac = ((i / 3) + t) % 1.0;
+        if (!forward) frac = 1.0 - frac; // reverse direction
+        // Simple linear interp in lat/lon — good enough at CB distances and
+        // avoids the cost of full spherical interpolation on every frame.
+        final lat = me.latitude  + (other.latitude  - me.latitude)  * frac;
+        final lon = me.longitude + (other.longitude - me.longitude) * frac;
+        markers.add(Marker(
+          point: LatLng(lat, lon),
+          width: 6, height: 6,
+          child: Container(
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.85),
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: color.withOpacity(0.6), blurRadius: 4)],
+            ),
+          ),
+        ));
+      }
+    }
+    return markers;
+  }
+
+  Widget _coverageLayer(List<Qso> qsos, LatLng me, Color color) {
+    double maxKm = 0;
+    for (final q in qsos) {
+      final ll = gridToLatLng(q.gridsquare);
+      if (ll == null) continue;
+      final d = const Distance().as(LengthUnit.Kilometer, me, ll);
+      if (d > maxKm) maxKm = d;
+    }
+    if (maxKm <= 0) return const SizedBox.shrink();
+    return CircleLayer(circles: [
+      CircleMarker(
+        point: me,
+        radius: maxKm * 1000, // metres
+        useRadiusInMeter: true,
+        color: color.withOpacity(0.05),
+        borderColor: color.withOpacity(0.55),
+        borderStrokeWidth: 1.2,
+      ),
+    ]);
+  }
+
+  String _shortHm(DateTime dt) {
+    final d = dt.toUtc();
+    String p2(int n) => n.toString().padLeft(2, '0');
+    return '${p2(d.hour)}:${p2(d.minute)}Z';
   }
 
   Widget _buildTileLayer(MapStyle style) {
@@ -393,21 +543,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 }
 
 class _FilterState {
-  final bool showQsos, showDecodes, showLines, showMe, showPskSpots;
+  final bool showQsos, showDecodes, showLines, showMe, showPskSpots, showGreyline;
   final QsoAgeFilter ageFilter;
-  final int ageCustomHours;
+  final int ageCustomMinutes;
   final double minSnr;
   const _FilterState({
     required this.showQsos, required this.showDecodes, required this.showLines,
-    required this.showMe, required this.showPskSpots,
-    required this.ageFilter, required this.ageCustomHours, required this.minSnr,
+    required this.showMe, required this.showPskSpots, required this.showGreyline,
+    required this.ageFilter, required this.ageCustomMinutes, required this.minSnr,
   });
 }
 
 class _FilterPanel extends ConsumerWidget {
-  final bool showQsos, showDecodes, showLines, showMe, showPskSpots;
+  final bool showQsos, showDecodes, showLines, showMe, showPskSpots, showGreyline;
   final QsoAgeFilter ageFilter;
-  final int ageCustomHours;
+  final int ageCustomMinutes;
   final double minSnr;
   final ValueChanged<_FilterState> onChanged;
   final VoidCallback onClose;
@@ -418,8 +568,9 @@ class _FilterPanel extends ConsumerWidget {
     required this.showLines,
     required this.showMe,
     required this.showPskSpots,
+    required this.showGreyline,
     required this.ageFilter,
-    required this.ageCustomHours,
+    required this.ageCustomMinutes,
     required this.minSnr,
     required this.onChanged,
     required this.onClose,
@@ -473,6 +624,7 @@ class _FilterPanel extends ConsumerWidget {
               _switchRow(context, 'PSK Reporter spots', showPskSpots, (v) => _emit(showPskSpots: v)),
               _switchRow(context, 'Great-circle lines', showLines,    (v) => _emit(showLines: v)),
               _switchRow(context, 'My location',        showMe,       (v) => _emit(showMe: v)),
+              _switchRow(context, 'Greyline (day / night)', showGreyline, (v) => _emit(showGreyline: v)),
               const SizedBox(height: 16),
               _section(context, 'PSK Reporter (my callsign)'),
               const SizedBox(height: 6),
@@ -540,14 +692,14 @@ class _FilterPanel extends ConsumerWidget {
                   children: [
                     Expanded(
                       child: Slider(
-                        value: ageCustomHours.toDouble().clamp(1, 720),
-                        min: 1, max: 720, divisions: 719,
-                        label: _humanHours(ageCustomHours),
-                        onChanged: (v) => _emit(ageCustomHours: v.round()),
+                        value: ageCustomMinutes.toDouble().clamp(1, 60),
+                        min: 1, max: 60, divisions: 59,
+                        label: '$ageCustomMinutes min',
+                        onChanged: (v) => _emit(ageCustomMinutes: v.round()),
                       ),
                     ),
-                    SizedBox(width: 72,
-                      child: Text(_humanHours(ageCustomHours),
+                    SizedBox(width: 58,
+                      child: Text('$ageCustomMinutes min',
                           style: t.bodySmall, textAlign: TextAlign.right)),
                   ],
                 ),
@@ -579,26 +731,21 @@ class _FilterPanel extends ConsumerWidget {
     );
   }
 
-  String _humanHours(int h) {
-    if (h < 24) return '$h h';
-    final d = h ~/ 24;
-    final rest = h % 24;
-    return rest == 0 ? '$d d' : '${d}d ${rest}h';
-  }
 
   void _emit({
-    bool? showQsos, bool? showDecodes, bool? showLines, bool? showMe, bool? showPskSpots,
-    QsoAgeFilter? ageFilter, int? ageCustomHours, double? minSnr,
+    bool? showQsos, bool? showDecodes, bool? showLines, bool? showMe, bool? showPskSpots, bool? showGreyline,
+    QsoAgeFilter? ageFilter, int? ageCustomMinutes, double? minSnr,
   }) {
     onChanged(_FilterState(
-      showQsos:       showQsos       ?? this.showQsos,
-      showDecodes:    showDecodes    ?? this.showDecodes,
-      showLines:      showLines      ?? this.showLines,
-      showMe:         showMe         ?? this.showMe,
-      showPskSpots:   showPskSpots   ?? this.showPskSpots,
-      ageFilter:      ageFilter      ?? this.ageFilter,
-      ageCustomHours: ageCustomHours ?? this.ageCustomHours,
-      minSnr:         minSnr         ?? this.minSnr,
+      showQsos:         showQsos         ?? this.showQsos,
+      showDecodes:      showDecodes      ?? this.showDecodes,
+      showLines:        showLines        ?? this.showLines,
+      showMe:           showMe           ?? this.showMe,
+      showPskSpots:     showPskSpots     ?? this.showPskSpots,
+      showGreyline:     showGreyline     ?? this.showGreyline,
+      ageFilter:        ageFilter        ?? this.ageFilter,
+      ageCustomMinutes: ageCustomMinutes ?? this.ageCustomMinutes,
+      minSnr:           minSnr           ?? this.minSnr,
     ));
   }
 
@@ -671,14 +818,17 @@ class _QsoMarker extends StatelessWidget {
       triggerMode: TooltipTriggerMode.tap,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
-        child: Center(
-          child: Container(
-            width: 10, height: 10,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.88),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withOpacity(0.9), width: 1.4),
-              boxShadow: [BoxShadow(color: color.withOpacity(0.35), blurRadius: 4)],
+        child: GestureDetector(
+          onDoubleTap: () => showStationProfile(context, qso.call),
+          child: Center(
+            child: Container(
+              width: 10, height: 10,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.88),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white.withOpacity(0.9), width: 1.4),
+                boxShadow: [BoxShadow(color: color.withOpacity(0.35), blurRadius: 4)],
+              ),
             ),
           ),
         ),
@@ -778,6 +928,201 @@ class _QsoTooltipCard extends StatelessWidget {
         border: Border.all(color: c.border),
       ),
       child: Text(s, style: Theme.of(context).textTheme.labelSmall),
+    );
+  }
+}
+
+/// Day/night terminator overlay. Uses [computeGreyline] to build a chain
+/// of points across the map; the "night" hemisphere is shown as a soft
+/// dark polygon and the terminator itself as a thin dashed line so it
+/// remains visible against the retro dark tiles.
+class _GreylineLayer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final result = computeGreyline(DateTime.now().toUtc());
+    // Night polygon: terminator + a wrap around the pole away from the sun.
+    final northernSummer = result.solarDeclDeg > 0;
+    final poleLat = northernSummer ? -85.0 : 85.0;
+    final poly = <LatLng>[
+      ...result.terminator,
+      LatLng(poleLat,  180),
+      LatLng(poleLat, -180),
+    ];
+    return Stack(children: [
+      PolygonLayer(polygons: [
+        Polygon(
+          points: poly,
+          color: Colors.black.withOpacity(0.30),
+          borderColor: Colors.transparent,
+          borderStrokeWidth: 0,
+        ),
+      ]),
+      PolylineLayer(polylines: [
+        Polyline(
+          points: result.terminator,
+          color: c.warning.withOpacity(0.75),
+          strokeWidth: 1.4,
+          pattern: StrokePattern.dashed(segments: const [8.0, 6.0]),
+        ),
+      ]),
+    ]);
+  }
+}
+
+/// Small "WSJT-CB connected/waiting" pill anchored upper-left of the map,
+/// mirroring the Live screen's status dot so users always see the link
+/// state at a glance.
+class _WsjtStatusPill extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_WsjtStatusPill> createState() => _WsjtStatusPillState();
+}
+
+class _WsjtStatusPillState extends ConsumerState<_WsjtStatusPill> {
+  Timer? _tick;
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+  }
+  @override
+  void dispose() { _tick?.cancel(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    final udp = ref.watch(udpListenerProvider);
+    final last = udp.lastPacketAt;
+    final connected = last != null && DateTime.now().difference(last).inSeconds < 20;
+    final c = context.colors;
+    final t = Theme.of(context).textTheme;
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      color: c.card.withOpacity(0.92),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 8, height: 8, color: connected ? c.success : c.subtle),
+        const SizedBox(width: 8),
+        Text('WSJT-CB', style: t.labelSmall),
+        const SizedBox(width: 6),
+        Text(connected ? 'CONNECTED' : 'WAITING',
+            style: t.labelSmall?.copyWith(color: connected ? c.success : c.subtle)),
+      ]),
+    );
+  }
+}
+
+/// Bottom-of-map timeline scrubber for replay mode. The slider represents
+/// [spanHours] worth of history ending at "now" — sliding left rewinds the
+/// visible universe of QSOs / decodes / spots.
+class _ReplayBar extends StatelessWidget {
+  final DateTime at;
+  final int spanHours;
+  final bool autoplay;
+  final ValueChanged<DateTime> onSeek;
+  final ValueChanged<int> onSpanChanged;
+  final VoidCallback onPlayToggle;
+  final VoidCallback onClose;
+
+  const _ReplayBar({
+    required this.at,
+    required this.spanHours,
+    required this.autoplay,
+    required this.onSeek,
+    required this.onSpanChanged,
+    required this.onPlayToggle,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final t = Theme.of(context).textTheme;
+    final now = DateTime.now().toUtc();
+    final start = now.subtract(Duration(hours: spanHours));
+    final total = now.difference(start).inMilliseconds.toDouble();
+    final pos   = at.toUtc().difference(start).inMilliseconds.toDouble().clamp(0.0, total);
+
+    String label(DateTime d) {
+      final u = d.toUtc();
+      String p2(int n) => n.toString().padLeft(2, '0');
+      return '${u.year}-${p2(u.month)}-${p2(u.day)}  ${p2(u.hour)}:${p2(u.minute)}Z';
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: c.card.withOpacity(0.94),
+        border: Border.all(color: c.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 10, 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.history, size: 14, color: c.subtle),
+              const SizedBox(width: 6),
+              Text('REPLAY', style: t.labelSmall),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: onPlayToggle,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: (autoplay ? c.accent : c.surface),
+                    border: Border.all(color: c.border),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(autoplay ? Icons.pause : Icons.play_arrow,
+                        size: 12, color: autoplay ? Colors.black : c.text),
+                    const SizedBox(width: 4),
+                    Text(autoplay ? 'PAUSE' : 'PLAY',
+                        style: t.labelSmall?.copyWith(
+                          color: autoplay ? Colors.black : c.text, fontWeight: FontWeight.w700)),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Span-of-history selector (few common presets).
+              for (final h in const [6, 24, 72])
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: GestureDetector(
+                    onTap: () => onSpanChanged(h),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: spanHours == h ? c.accent.withOpacity(0.15) : c.surface,
+                        border: Border.all(color: spanHours == h ? c.accent : c.border),
+                      ),
+                      child: Text('${h}h', style: t.labelSmall?.copyWith(
+                        color: spanHours == h ? c.accent : c.subtle,
+                        fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ),
+              const Spacer(),
+              Text(label(at), style: t.bodySmall?.copyWith(fontFamily: 'Menlo')),
+              const SizedBox(width: 4),
+              InkWell(
+                onTap: onClose,
+                child: Padding(padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.close, size: 14, color: c.subtle)),
+              ),
+            ]),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                overlayShape: SliderComponentShape.noOverlay,
+              ),
+              child: Slider(
+                value: pos,
+                min: 0, max: total <= 0 ? 1 : total,
+                onChanged: (v) => onSeek(start.add(Duration(milliseconds: v.round()))),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -930,6 +1275,13 @@ class _RetroOverlayPainter extends CustomPainter {
 /// PSK Reporter spot marker: rotated square (diamond) with a magenta tint
 /// and a "PSK" chip in the tooltip so it's visually distinct from our own
 /// QSOs and live decodes.
+String _formatAge(Duration d) {
+  if (d.inSeconds < 60) return '${d.inSeconds}s ago';
+  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+  if (d.inHours   < 24) return '${d.inHours}h ${d.inMinutes % 60}m ago';
+  return '${d.inDays}d ${d.inHours % 24}h ago';
+}
+
 class _PskSpotMarker extends StatelessWidget {
   final PskSpot spot;
   final Color color;
@@ -942,6 +1294,8 @@ class _PskSpotMarker extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final c = context.colors;
     final freqMhz = spot.freqHz / 1e6;
+    final age = DateTime.now().toUtc().difference(spot.at.toUtc());
+    final ageStr = _formatAge(age);
     final tip = StringBuffer()
       ..write('[PSK REPORTER]\n')
       ..write(spot.direction == PskDirection.sent ? 'HEARD ME:  ' : 'I HEARD:  ')
@@ -952,10 +1306,12 @@ class _PskSpotMarker extends StatelessWidget {
       ..write('${freqMhz.toStringAsFixed(3)} MHz  ·  ')
       ..write(spot.snr >= 0 ? '+${spot.snr}' : '${spot.snr}')
       ..write(' dB  ·  ')
-      ..write(spot.mode);
+      ..write(spot.mode)
+      ..write('\n')
+      ..write(ageStr);
     if (distanceKm != null) {
       tip
-        ..write('\n')
+        ..write('  ·  ')
         ..write('${unit.from(distanceKm!).toStringAsFixed(0)} ${unit.label}');
     }
     return Tooltip(

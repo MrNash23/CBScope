@@ -436,40 +436,70 @@ final solarDataProvider = StreamProvider<SolarData?>((ref) async* {
 /// when the user hasn't set a callsign yet.
 final pskSpotsProvider = StreamProvider<List<PskSpot>>((ref) async* {
   final s = ref.watch(settingsProvider);
-  debugPrint('[psk] provider run: dir=${s.pskSpotDirection} call=${s.myCall} window=${s.pskSpotWindow.label}');
   if (s.pskSpotDirection == PskSpotDirection.off) { yield const []; return; }
   final call = s.myCall?.trim();
-  if (call == null || call.isEmpty) {
-    print('[psk] no callsign — set myCall in Settings'); // ignore: avoid_print
-    yield const [];
-    return;
-  }
+  if (call == null || call.isEmpty) { yield const []; return; }
   final client = ref.watch(pskReporterClientProvider);
+  final repo = ref.watch(qsoRepoProvider);
 
-  Future<List<PskSpot>> fetchAll() async {
-    final directions = <PskDirection>[];
-    if (s.pskSpotDirection == PskSpotDirection.sent     || s.pskSpotDirection == PskSpotDirection.both) directions.add(PskDirection.sent);
-    if (s.pskSpotDirection == PskSpotDirection.received || s.pskSpotDirection == PskSpotDirection.both) directions.add(PskDirection.received);
+  Duration windowFor(AppSettings s) => s.pskSpotWindow == PskSpotWindow.custom
+      ? Duration(minutes: s.pskSpotCustomMinutes.clamp(1, 60))
+      : s.pskSpotWindow.duration;
+
+  List<PskDirection> directionsFor(AppSettings s) {
+    final r = <PskDirection>[];
+    if (s.pskSpotDirection == PskSpotDirection.sent     || s.pskSpotDirection == PskSpotDirection.both) r.add(PskDirection.sent);
+    if (s.pskSpotDirection == PskSpotDirection.received || s.pskSpotDirection == PskSpotDirection.both) r.add(PskDirection.received);
+    return r;
+  }
+
+  // Read 7-day rolling cache back into PskSpot objects.
+  Future<List<PskSpot>> readCache() async {
+    final since = windowFor(s);
+    final dirs = directionsFor(s);
     final all = <PskSpot>[];
-    for (final dir in directions) {
-      try {
-        final since = s.pskSpotWindow == PskSpotWindow.custom
-            ? Duration(minutes: s.pskSpotCustomMinutes.clamp(1, 60))
-            : s.pskSpotWindow.duration;
-        final r = await client.fetchSpots(myCall: call, direction: dir, since: since);
-        print('[psk] got ${r.length} spots for dir=$dir'); // ignore: avoid_print
-        all.addAll(r);
-      } catch (e, st) {
-        print('[psk] fetch failed: $e\n$st'); // ignore: avoid_print
+    for (final d in dirs) {
+      final rows = await repo.readCachedPskSpots(myCall: call, since: since, direction: d.name);
+      for (final r in rows) {
+        all.add(PskSpot(
+          otherCall: r.otherCall, otherGrid: r.otherGrid, direction: d,
+          at: r.at, freqHz: r.freqHz, snr: r.snr, mode: r.mode,
+        ));
       }
     }
     return all;
   }
 
-  yield await fetchAll();
+  // Fresh fetch + persist. Failures degrade gracefully: whatever we got is
+  // merged with the cache so the map never goes empty just because one
+  // direction returned 503.
+  Future<List<PskSpot>> fetchAndCache() async {
+    final since = windowFor(s);
+    final dirs = directionsFor(s);
+    final fresh = <PskSpot>[];
+    for (final dir in dirs) {
+      try {
+        final r = await client.fetchSpots(myCall: call, direction: dir, since: since);
+        fresh.addAll(r);
+        await repo.cachePskSpots(call, dir.name,
+          r.map((s) => (otherCall: s.otherCall, otherGrid: s.otherGrid,
+                        at: s.at, freqHz: s.freqHz, snr: s.snr, mode: s.mode)));
+      } catch (e) {
+        debugPrint('PSK Reporter fetch failed ($dir): $e — falling back to cache');
+      }
+    }
+    final combined = <String, PskSpot>{};
+    void add(PskSpot p) => combined['${p.otherCall}|${p.direction.name}|${p.at.millisecondsSinceEpoch}|${p.freqHz}'] = p;
+    for (final p in fresh) { add(p); }
+    for (final p in await readCache()) { add(p); }
+    return combined.values.toList();
+  }
+
+  yield await readCache();
+  yield await fetchAndCache();
   final t = Stream<void>.periodic(const Duration(minutes: 5));
   await for (final _ in t) {
-    yield await fetchAll();
+    yield await fetchAndCache();
   }
 });
 
@@ -591,6 +621,13 @@ final needsReviewCountProvider = StreamProvider<int>((ref) => ref.watch(qsoRepoP
 final workedCallsignsProvider = FutureProvider<Set<String>>((ref) async {
   ref.watch(logbookProvider);
   return ref.watch(qsoRepoProvider).workedCallsigns();
+});
+
+final equipmentStatsProvider = FutureProvider<List<EquipmentStat>>((ref) async {
+  ref.watch(logbookProvider);
+  final s = ref.watch(settingsProvider);
+  final me = s.myGrid == null ? null : _gridToLatLngPublic(s.myGrid!);
+  return ref.watch(qsoRepoProvider).equipmentStats(myLat: me?.$1, myLon: me?.$2);
 });
 
 final statsExtrasProvider = FutureProvider<StatsExtras>((ref) async {

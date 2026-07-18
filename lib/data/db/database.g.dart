@@ -2290,6 +2290,539 @@ class RigsCompanion extends UpdateCompanion<Rig> {
   }
 }
 
+class $PskSpotsCacheTable extends PskSpotsCache
+    with TableInfo<$PskSpotsCacheTable, PskSpotsCacheData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PskSpotsCacheTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      hasAutoIncrement: true,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _myCallMeta = const VerificationMeta('myCall');
+  @override
+  late final GeneratedColumn<String> myCall = GeneratedColumn<String>(
+      'my_call', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _otherCallMeta =
+      const VerificationMeta('otherCall');
+  @override
+  late final GeneratedColumn<String> otherCall = GeneratedColumn<String>(
+      'other_call', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _otherGridMeta =
+      const VerificationMeta('otherGrid');
+  @override
+  late final GeneratedColumn<String> otherGrid = GeneratedColumn<String>(
+      'other_grid', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _directionMeta =
+      const VerificationMeta('direction');
+  @override
+  late final GeneratedColumn<String> direction = GeneratedColumn<String>(
+      'direction', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _atMeta = const VerificationMeta('at');
+  @override
+  late final GeneratedColumn<DateTime> at = GeneratedColumn<DateTime>(
+      'at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _freqHzMeta = const VerificationMeta('freqHz');
+  @override
+  late final GeneratedColumn<int> freqHz = GeneratedColumn<int>(
+      'freq_hz', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _snrMeta = const VerificationMeta('snr');
+  @override
+  late final GeneratedColumn<int> snr = GeneratedColumn<int>(
+      'snr', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _modeMeta = const VerificationMeta('mode');
+  @override
+  late final GeneratedColumn<String> mode = GeneratedColumn<String>(
+      'mode', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _fetchedAtMeta =
+      const VerificationMeta('fetchedAt');
+  @override
+  late final GeneratedColumn<DateTime> fetchedAt = GeneratedColumn<DateTime>(
+      'fetched_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  static const VerificationMeta _dedupKeyMeta =
+      const VerificationMeta('dedupKey');
+  @override
+  late final GeneratedColumn<String> dedupKey = GeneratedColumn<String>(
+      'dedup_key', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'));
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        myCall,
+        otherCall,
+        otherGrid,
+        direction,
+        at,
+        freqHz,
+        snr,
+        mode,
+        fetchedAt,
+        dedupKey
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'psk_spots_cache';
+  @override
+  VerificationContext validateIntegrity(Insertable<PskSpotsCacheData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('my_call')) {
+      context.handle(_myCallMeta,
+          myCall.isAcceptableOrUnknown(data['my_call']!, _myCallMeta));
+    } else if (isInserting) {
+      context.missing(_myCallMeta);
+    }
+    if (data.containsKey('other_call')) {
+      context.handle(_otherCallMeta,
+          otherCall.isAcceptableOrUnknown(data['other_call']!, _otherCallMeta));
+    } else if (isInserting) {
+      context.missing(_otherCallMeta);
+    }
+    if (data.containsKey('other_grid')) {
+      context.handle(_otherGridMeta,
+          otherGrid.isAcceptableOrUnknown(data['other_grid']!, _otherGridMeta));
+    } else if (isInserting) {
+      context.missing(_otherGridMeta);
+    }
+    if (data.containsKey('direction')) {
+      context.handle(_directionMeta,
+          direction.isAcceptableOrUnknown(data['direction']!, _directionMeta));
+    } else if (isInserting) {
+      context.missing(_directionMeta);
+    }
+    if (data.containsKey('at')) {
+      context.handle(_atMeta, at.isAcceptableOrUnknown(data['at']!, _atMeta));
+    } else if (isInserting) {
+      context.missing(_atMeta);
+    }
+    if (data.containsKey('freq_hz')) {
+      context.handle(_freqHzMeta,
+          freqHz.isAcceptableOrUnknown(data['freq_hz']!, _freqHzMeta));
+    } else if (isInserting) {
+      context.missing(_freqHzMeta);
+    }
+    if (data.containsKey('snr')) {
+      context.handle(
+          _snrMeta, snr.isAcceptableOrUnknown(data['snr']!, _snrMeta));
+    } else if (isInserting) {
+      context.missing(_snrMeta);
+    }
+    if (data.containsKey('mode')) {
+      context.handle(
+          _modeMeta, mode.isAcceptableOrUnknown(data['mode']!, _modeMeta));
+    } else if (isInserting) {
+      context.missing(_modeMeta);
+    }
+    if (data.containsKey('fetched_at')) {
+      context.handle(_fetchedAtMeta,
+          fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta));
+    }
+    if (data.containsKey('dedup_key')) {
+      context.handle(_dedupKeyMeta,
+          dedupKey.isAcceptableOrUnknown(data['dedup_key']!, _dedupKeyMeta));
+    } else if (isInserting) {
+      context.missing(_dedupKeyMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PskSpotsCacheData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PskSpotsCacheData(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      myCall: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}my_call'])!,
+      otherCall: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}other_call'])!,
+      otherGrid: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}other_grid'])!,
+      direction: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}direction'])!,
+      at: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}at'])!,
+      freqHz: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}freq_hz'])!,
+      snr: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}snr'])!,
+      mode: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}mode'])!,
+      fetchedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}fetched_at'])!,
+      dedupKey: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}dedup_key'])!,
+    );
+  }
+
+  @override
+  $PskSpotsCacheTable createAlias(String alias) {
+    return $PskSpotsCacheTable(attachedDatabase, alias);
+  }
+}
+
+class PskSpotsCacheData extends DataClass
+    implements Insertable<PskSpotsCacheData> {
+  final int id;
+  final String myCall;
+  final String otherCall;
+  final String otherGrid;
+
+  /// 'sent' or 'received' (which side of the report we're on).
+  final String direction;
+  final DateTime at;
+  final int freqHz;
+  final int snr;
+  final String mode;
+  final DateTime fetchedAt;
+
+  /// Deduplication key: (myCall, otherCall, direction, at, freqHz).
+  final String dedupKey;
+  const PskSpotsCacheData(
+      {required this.id,
+      required this.myCall,
+      required this.otherCall,
+      required this.otherGrid,
+      required this.direction,
+      required this.at,
+      required this.freqHz,
+      required this.snr,
+      required this.mode,
+      required this.fetchedAt,
+      required this.dedupKey});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['my_call'] = Variable<String>(myCall);
+    map['other_call'] = Variable<String>(otherCall);
+    map['other_grid'] = Variable<String>(otherGrid);
+    map['direction'] = Variable<String>(direction);
+    map['at'] = Variable<DateTime>(at);
+    map['freq_hz'] = Variable<int>(freqHz);
+    map['snr'] = Variable<int>(snr);
+    map['mode'] = Variable<String>(mode);
+    map['fetched_at'] = Variable<DateTime>(fetchedAt);
+    map['dedup_key'] = Variable<String>(dedupKey);
+    return map;
+  }
+
+  PskSpotsCacheCompanion toCompanion(bool nullToAbsent) {
+    return PskSpotsCacheCompanion(
+      id: Value(id),
+      myCall: Value(myCall),
+      otherCall: Value(otherCall),
+      otherGrid: Value(otherGrid),
+      direction: Value(direction),
+      at: Value(at),
+      freqHz: Value(freqHz),
+      snr: Value(snr),
+      mode: Value(mode),
+      fetchedAt: Value(fetchedAt),
+      dedupKey: Value(dedupKey),
+    );
+  }
+
+  factory PskSpotsCacheData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PskSpotsCacheData(
+      id: serializer.fromJson<int>(json['id']),
+      myCall: serializer.fromJson<String>(json['myCall']),
+      otherCall: serializer.fromJson<String>(json['otherCall']),
+      otherGrid: serializer.fromJson<String>(json['otherGrid']),
+      direction: serializer.fromJson<String>(json['direction']),
+      at: serializer.fromJson<DateTime>(json['at']),
+      freqHz: serializer.fromJson<int>(json['freqHz']),
+      snr: serializer.fromJson<int>(json['snr']),
+      mode: serializer.fromJson<String>(json['mode']),
+      fetchedAt: serializer.fromJson<DateTime>(json['fetchedAt']),
+      dedupKey: serializer.fromJson<String>(json['dedupKey']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'myCall': serializer.toJson<String>(myCall),
+      'otherCall': serializer.toJson<String>(otherCall),
+      'otherGrid': serializer.toJson<String>(otherGrid),
+      'direction': serializer.toJson<String>(direction),
+      'at': serializer.toJson<DateTime>(at),
+      'freqHz': serializer.toJson<int>(freqHz),
+      'snr': serializer.toJson<int>(snr),
+      'mode': serializer.toJson<String>(mode),
+      'fetchedAt': serializer.toJson<DateTime>(fetchedAt),
+      'dedupKey': serializer.toJson<String>(dedupKey),
+    };
+  }
+
+  PskSpotsCacheData copyWith(
+          {int? id,
+          String? myCall,
+          String? otherCall,
+          String? otherGrid,
+          String? direction,
+          DateTime? at,
+          int? freqHz,
+          int? snr,
+          String? mode,
+          DateTime? fetchedAt,
+          String? dedupKey}) =>
+      PskSpotsCacheData(
+        id: id ?? this.id,
+        myCall: myCall ?? this.myCall,
+        otherCall: otherCall ?? this.otherCall,
+        otherGrid: otherGrid ?? this.otherGrid,
+        direction: direction ?? this.direction,
+        at: at ?? this.at,
+        freqHz: freqHz ?? this.freqHz,
+        snr: snr ?? this.snr,
+        mode: mode ?? this.mode,
+        fetchedAt: fetchedAt ?? this.fetchedAt,
+        dedupKey: dedupKey ?? this.dedupKey,
+      );
+  PskSpotsCacheData copyWithCompanion(PskSpotsCacheCompanion data) {
+    return PskSpotsCacheData(
+      id: data.id.present ? data.id.value : this.id,
+      myCall: data.myCall.present ? data.myCall.value : this.myCall,
+      otherCall: data.otherCall.present ? data.otherCall.value : this.otherCall,
+      otherGrid: data.otherGrid.present ? data.otherGrid.value : this.otherGrid,
+      direction: data.direction.present ? data.direction.value : this.direction,
+      at: data.at.present ? data.at.value : this.at,
+      freqHz: data.freqHz.present ? data.freqHz.value : this.freqHz,
+      snr: data.snr.present ? data.snr.value : this.snr,
+      mode: data.mode.present ? data.mode.value : this.mode,
+      fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+      dedupKey: data.dedupKey.present ? data.dedupKey.value : this.dedupKey,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PskSpotsCacheData(')
+          ..write('id: $id, ')
+          ..write('myCall: $myCall, ')
+          ..write('otherCall: $otherCall, ')
+          ..write('otherGrid: $otherGrid, ')
+          ..write('direction: $direction, ')
+          ..write('at: $at, ')
+          ..write('freqHz: $freqHz, ')
+          ..write('snr: $snr, ')
+          ..write('mode: $mode, ')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('dedupKey: $dedupKey')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, myCall, otherCall, otherGrid, direction,
+      at, freqHz, snr, mode, fetchedAt, dedupKey);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PskSpotsCacheData &&
+          other.id == this.id &&
+          other.myCall == this.myCall &&
+          other.otherCall == this.otherCall &&
+          other.otherGrid == this.otherGrid &&
+          other.direction == this.direction &&
+          other.at == this.at &&
+          other.freqHz == this.freqHz &&
+          other.snr == this.snr &&
+          other.mode == this.mode &&
+          other.fetchedAt == this.fetchedAt &&
+          other.dedupKey == this.dedupKey);
+}
+
+class PskSpotsCacheCompanion extends UpdateCompanion<PskSpotsCacheData> {
+  final Value<int> id;
+  final Value<String> myCall;
+  final Value<String> otherCall;
+  final Value<String> otherGrid;
+  final Value<String> direction;
+  final Value<DateTime> at;
+  final Value<int> freqHz;
+  final Value<int> snr;
+  final Value<String> mode;
+  final Value<DateTime> fetchedAt;
+  final Value<String> dedupKey;
+  const PskSpotsCacheCompanion({
+    this.id = const Value.absent(),
+    this.myCall = const Value.absent(),
+    this.otherCall = const Value.absent(),
+    this.otherGrid = const Value.absent(),
+    this.direction = const Value.absent(),
+    this.at = const Value.absent(),
+    this.freqHz = const Value.absent(),
+    this.snr = const Value.absent(),
+    this.mode = const Value.absent(),
+    this.fetchedAt = const Value.absent(),
+    this.dedupKey = const Value.absent(),
+  });
+  PskSpotsCacheCompanion.insert({
+    this.id = const Value.absent(),
+    required String myCall,
+    required String otherCall,
+    required String otherGrid,
+    required String direction,
+    required DateTime at,
+    required int freqHz,
+    required int snr,
+    required String mode,
+    this.fetchedAt = const Value.absent(),
+    required String dedupKey,
+  })  : myCall = Value(myCall),
+        otherCall = Value(otherCall),
+        otherGrid = Value(otherGrid),
+        direction = Value(direction),
+        at = Value(at),
+        freqHz = Value(freqHz),
+        snr = Value(snr),
+        mode = Value(mode),
+        dedupKey = Value(dedupKey);
+  static Insertable<PskSpotsCacheData> custom({
+    Expression<int>? id,
+    Expression<String>? myCall,
+    Expression<String>? otherCall,
+    Expression<String>? otherGrid,
+    Expression<String>? direction,
+    Expression<DateTime>? at,
+    Expression<int>? freqHz,
+    Expression<int>? snr,
+    Expression<String>? mode,
+    Expression<DateTime>? fetchedAt,
+    Expression<String>? dedupKey,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (myCall != null) 'my_call': myCall,
+      if (otherCall != null) 'other_call': otherCall,
+      if (otherGrid != null) 'other_grid': otherGrid,
+      if (direction != null) 'direction': direction,
+      if (at != null) 'at': at,
+      if (freqHz != null) 'freq_hz': freqHz,
+      if (snr != null) 'snr': snr,
+      if (mode != null) 'mode': mode,
+      if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (dedupKey != null) 'dedup_key': dedupKey,
+    });
+  }
+
+  PskSpotsCacheCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? myCall,
+      Value<String>? otherCall,
+      Value<String>? otherGrid,
+      Value<String>? direction,
+      Value<DateTime>? at,
+      Value<int>? freqHz,
+      Value<int>? snr,
+      Value<String>? mode,
+      Value<DateTime>? fetchedAt,
+      Value<String>? dedupKey}) {
+    return PskSpotsCacheCompanion(
+      id: id ?? this.id,
+      myCall: myCall ?? this.myCall,
+      otherCall: otherCall ?? this.otherCall,
+      otherGrid: otherGrid ?? this.otherGrid,
+      direction: direction ?? this.direction,
+      at: at ?? this.at,
+      freqHz: freqHz ?? this.freqHz,
+      snr: snr ?? this.snr,
+      mode: mode ?? this.mode,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+      dedupKey: dedupKey ?? this.dedupKey,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (myCall.present) {
+      map['my_call'] = Variable<String>(myCall.value);
+    }
+    if (otherCall.present) {
+      map['other_call'] = Variable<String>(otherCall.value);
+    }
+    if (otherGrid.present) {
+      map['other_grid'] = Variable<String>(otherGrid.value);
+    }
+    if (direction.present) {
+      map['direction'] = Variable<String>(direction.value);
+    }
+    if (at.present) {
+      map['at'] = Variable<DateTime>(at.value);
+    }
+    if (freqHz.present) {
+      map['freq_hz'] = Variable<int>(freqHz.value);
+    }
+    if (snr.present) {
+      map['snr'] = Variable<int>(snr.value);
+    }
+    if (mode.present) {
+      map['mode'] = Variable<String>(mode.value);
+    }
+    if (fetchedAt.present) {
+      map['fetched_at'] = Variable<DateTime>(fetchedAt.value);
+    }
+    if (dedupKey.present) {
+      map['dedup_key'] = Variable<String>(dedupKey.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PskSpotsCacheCompanion(')
+          ..write('id: $id, ')
+          ..write('myCall: $myCall, ')
+          ..write('otherCall: $otherCall, ')
+          ..write('otherGrid: $otherGrid, ')
+          ..write('direction: $direction, ')
+          ..write('at: $at, ')
+          ..write('freqHz: $freqHz, ')
+          ..write('snr: $snr, ')
+          ..write('mode: $mode, ')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('dedupKey: $dedupKey')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2298,12 +2831,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $CallsignGridsTable callsignGrids = $CallsignGridsTable(this);
   late final $AntennasTable antennas = $AntennasTable(this);
   late final $RigsTable rigs = $RigsTable(this);
+  late final $PskSpotsCacheTable pskSpotsCache = $PskSpotsCacheTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [qsos, settings, callsignGrids, antennas, rigs];
+      [qsos, settings, callsignGrids, antennas, rigs, pskSpotsCache];
 }
 
 typedef $$QsosTableCreateCompanionBuilder = QsosCompanion Function({
@@ -3403,6 +3937,263 @@ typedef $$RigsTableProcessedTableManager = ProcessedTableManager<
     (Rig, BaseReferences<_$AppDatabase, $RigsTable, Rig>),
     Rig,
     PrefetchHooks Function()>;
+typedef $$PskSpotsCacheTableCreateCompanionBuilder = PskSpotsCacheCompanion
+    Function({
+  Value<int> id,
+  required String myCall,
+  required String otherCall,
+  required String otherGrid,
+  required String direction,
+  required DateTime at,
+  required int freqHz,
+  required int snr,
+  required String mode,
+  Value<DateTime> fetchedAt,
+  required String dedupKey,
+});
+typedef $$PskSpotsCacheTableUpdateCompanionBuilder = PskSpotsCacheCompanion
+    Function({
+  Value<int> id,
+  Value<String> myCall,
+  Value<String> otherCall,
+  Value<String> otherGrid,
+  Value<String> direction,
+  Value<DateTime> at,
+  Value<int> freqHz,
+  Value<int> snr,
+  Value<String> mode,
+  Value<DateTime> fetchedAt,
+  Value<String> dedupKey,
+});
+
+class $$PskSpotsCacheTableFilterComposer
+    extends Composer<_$AppDatabase, $PskSpotsCacheTable> {
+  $$PskSpotsCacheTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get myCall => $composableBuilder(
+      column: $table.myCall, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get otherCall => $composableBuilder(
+      column: $table.otherCall, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get otherGrid => $composableBuilder(
+      column: $table.otherGrid, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get direction => $composableBuilder(
+      column: $table.direction, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get at => $composableBuilder(
+      column: $table.at, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get freqHz => $composableBuilder(
+      column: $table.freqHz, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get snr => $composableBuilder(
+      column: $table.snr, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get mode => $composableBuilder(
+      column: $table.mode, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get fetchedAt => $composableBuilder(
+      column: $table.fetchedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get dedupKey => $composableBuilder(
+      column: $table.dedupKey, builder: (column) => ColumnFilters(column));
+}
+
+class $$PskSpotsCacheTableOrderingComposer
+    extends Composer<_$AppDatabase, $PskSpotsCacheTable> {
+  $$PskSpotsCacheTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get myCall => $composableBuilder(
+      column: $table.myCall, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get otherCall => $composableBuilder(
+      column: $table.otherCall, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get otherGrid => $composableBuilder(
+      column: $table.otherGrid, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get direction => $composableBuilder(
+      column: $table.direction, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get at => $composableBuilder(
+      column: $table.at, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get freqHz => $composableBuilder(
+      column: $table.freqHz, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get snr => $composableBuilder(
+      column: $table.snr, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get mode => $composableBuilder(
+      column: $table.mode, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get fetchedAt => $composableBuilder(
+      column: $table.fetchedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get dedupKey => $composableBuilder(
+      column: $table.dedupKey, builder: (column) => ColumnOrderings(column));
+}
+
+class $$PskSpotsCacheTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PskSpotsCacheTable> {
+  $$PskSpotsCacheTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get myCall =>
+      $composableBuilder(column: $table.myCall, builder: (column) => column);
+
+  GeneratedColumn<String> get otherCall =>
+      $composableBuilder(column: $table.otherCall, builder: (column) => column);
+
+  GeneratedColumn<String> get otherGrid =>
+      $composableBuilder(column: $table.otherGrid, builder: (column) => column);
+
+  GeneratedColumn<String> get direction =>
+      $composableBuilder(column: $table.direction, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get at =>
+      $composableBuilder(column: $table.at, builder: (column) => column);
+
+  GeneratedColumn<int> get freqHz =>
+      $composableBuilder(column: $table.freqHz, builder: (column) => column);
+
+  GeneratedColumn<int> get snr =>
+      $composableBuilder(column: $table.snr, builder: (column) => column);
+
+  GeneratedColumn<String> get mode =>
+      $composableBuilder(column: $table.mode, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get fetchedAt =>
+      $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get dedupKey =>
+      $composableBuilder(column: $table.dedupKey, builder: (column) => column);
+}
+
+class $$PskSpotsCacheTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $PskSpotsCacheTable,
+    PskSpotsCacheData,
+    $$PskSpotsCacheTableFilterComposer,
+    $$PskSpotsCacheTableOrderingComposer,
+    $$PskSpotsCacheTableAnnotationComposer,
+    $$PskSpotsCacheTableCreateCompanionBuilder,
+    $$PskSpotsCacheTableUpdateCompanionBuilder,
+    (
+      PskSpotsCacheData,
+      BaseReferences<_$AppDatabase, $PskSpotsCacheTable, PskSpotsCacheData>
+    ),
+    PskSpotsCacheData,
+    PrefetchHooks Function()> {
+  $$PskSpotsCacheTableTableManager(_$AppDatabase db, $PskSpotsCacheTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PskSpotsCacheTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PskSpotsCacheTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PskSpotsCacheTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> myCall = const Value.absent(),
+            Value<String> otherCall = const Value.absent(),
+            Value<String> otherGrid = const Value.absent(),
+            Value<String> direction = const Value.absent(),
+            Value<DateTime> at = const Value.absent(),
+            Value<int> freqHz = const Value.absent(),
+            Value<int> snr = const Value.absent(),
+            Value<String> mode = const Value.absent(),
+            Value<DateTime> fetchedAt = const Value.absent(),
+            Value<String> dedupKey = const Value.absent(),
+          }) =>
+              PskSpotsCacheCompanion(
+            id: id,
+            myCall: myCall,
+            otherCall: otherCall,
+            otherGrid: otherGrid,
+            direction: direction,
+            at: at,
+            freqHz: freqHz,
+            snr: snr,
+            mode: mode,
+            fetchedAt: fetchedAt,
+            dedupKey: dedupKey,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String myCall,
+            required String otherCall,
+            required String otherGrid,
+            required String direction,
+            required DateTime at,
+            required int freqHz,
+            required int snr,
+            required String mode,
+            Value<DateTime> fetchedAt = const Value.absent(),
+            required String dedupKey,
+          }) =>
+              PskSpotsCacheCompanion.insert(
+            id: id,
+            myCall: myCall,
+            otherCall: otherCall,
+            otherGrid: otherGrid,
+            direction: direction,
+            at: at,
+            freqHz: freqHz,
+            snr: snr,
+            mode: mode,
+            fetchedAt: fetchedAt,
+            dedupKey: dedupKey,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$PskSpotsCacheTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $PskSpotsCacheTable,
+    PskSpotsCacheData,
+    $$PskSpotsCacheTableFilterComposer,
+    $$PskSpotsCacheTableOrderingComposer,
+    $$PskSpotsCacheTableAnnotationComposer,
+    $$PskSpotsCacheTableCreateCompanionBuilder,
+    $$PskSpotsCacheTableUpdateCompanionBuilder,
+    (
+      PskSpotsCacheData,
+      BaseReferences<_$AppDatabase, $PskSpotsCacheTable, PskSpotsCacheData>
+    ),
+    PskSpotsCacheData,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3415,4 +4206,6 @@ class $AppDatabaseManager {
   $$AntennasTableTableManager get antennas =>
       $$AntennasTableTableManager(_db, _db.antennas);
   $$RigsTableTableManager get rigs => $$RigsTableTableManager(_db, _db.rigs);
+  $$PskSpotsCacheTableTableManager get pskSpotsCache =>
+      $$PskSpotsCacheTableTableManager(_db, _db.pskSpotsCache);
 }
