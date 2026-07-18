@@ -56,6 +56,9 @@ class AppSettings {
   final Color pskColor;
   final Color meColor;
   final MapStyle mapStyle;
+  /// Theme accent chosen from [AppTheme.accentPalette]. `null` keeps the
+  /// theme's built-in default (Tron cyan in dark, dark cyan in light).
+  final Color? themeAccent;
 
   const AppSettings({
     required this.udpPort,
@@ -77,6 +80,7 @@ class AppSettings {
     required this.pskColor,
     required this.meColor,
     required this.mapStyle,
+    this.themeAccent,
   });
 
   AppSettings copyWith({
@@ -99,8 +103,10 @@ class AppSettings {
     Color? pskColor,
     Color? meColor,
     MapStyle? mapStyle,
+    Color? themeAccent,
     bool clearMulticast = false,
     bool clearAdifPath = false,
+    bool clearThemeAccent = false,
   }) =>
       AppSettings(
         udpPort: udpPort ?? this.udpPort,
@@ -122,6 +128,7 @@ class AppSettings {
         pskColor:    pskColor    ?? this.pskColor,
         meColor:     meColor     ?? this.meColor,
         mapStyle:    mapStyle    ?? this.mapStyle,
+        themeAccent: clearThemeAccent ? null : (themeAccent ?? this.themeAccent),
       );
 }
 
@@ -206,6 +213,7 @@ class SettingsController extends StateNotifier<AppSettings> {
           pskColor:    Color(prefs.getInt('color.psk')    ?? MarkerColors.psk.value),
           meColor:     Color(prefs.getInt('color.me')     ?? MarkerColors.me.value),
           mapStyle:    MapStyle.values[prefs.getInt('mapStyle') ?? MapStyle.cbscopeRetro.index],
+          themeAccent: prefs.containsKey('themeAccent') ? Color(prefs.getInt('themeAccent')!) : null,
         ));
 
   Future<void> update(AppSettings next) async {
@@ -237,6 +245,11 @@ class SettingsController extends StateNotifier<AppSettings> {
     await prefs.setInt('color.psk',    next.pskColor.value);
     await prefs.setInt('color.me',     next.meColor.value);
     await prefs.setInt('mapStyle',     next.mapStyle.index);
+    if (next.themeAccent == null) {
+      await prefs.remove('themeAccent');
+    } else {
+      await prefs.setInt('themeAccent', next.themeAccent!.value);
+    }
   }
 }
 

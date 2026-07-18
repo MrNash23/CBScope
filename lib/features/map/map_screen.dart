@@ -217,10 +217,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             // Animated dots flowing along each PSK great-circle line.
             if (_showPskSpots && myLatLng != null && pskMarkers.isNotEmpty)
               MarkerLayer(markers: _flowingPskDots(myLatLng, pskSpots, pskColor)),
-            // Coverage footprint: when the user filters by radio / antenna,
-            // draw a translucent circle at their farthest QSO distance.
-            if (myLatLng != null && (ref.watch(logbookFilterProvider).radioId != null || ref.watch(logbookFilterProvider).antennaId != null))
-              _coverageLayer(qsos, myLatLng, qsoColor),
+            // Coverage heatmap: when the user filters by radio / antenna we
+            // render per-QSO heat blobs coloured by RST received, plus a
+            // soft hull outline around all points. Overlapping blobs create
+            // the density gradient — no external heatmap package needed.
+            if (ref.watch(logbookFilterProvider).radioId != null ||
+                ref.watch(logbookFilterProvider).antennaId != null)
+              ..._coverageLayers(qsos, myLatLng),
             MarkerLayer(markers: [...qsoMarkers, ...pskMarkers, ...decodeMarkers]),
             if (_showMe && myLatLng != null)
               MarkerLayer(markers: [
@@ -426,25 +429,112 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return markers;
   }
 
-  Widget _coverageLayer(List<Qso> qsos, LatLng me, Color color) {
-    double maxKm = 0;
+  /// Build the heatmap layers for equipment coverage:
+  /// - one soft filled polygon (convex hull) enclosing every point we know
+  ///   about with the currently-selected radio/antenna filter, so the
+  ///   coverage "shape" reads at a glance and isn't forced to be a circle;
+  /// - a CircleLayer of per-QSO blobs coloured by RST received (red = weak,
+  ///   yellow = medium, cyan/green = strong), with alpha low enough that
+  ///   overlapping stations naturally get brighter — that's the heat.
+  List<Widget> _coverageLayers(List<Qso> qsos, LatLng? me) {
+    final points = <LatLng>[];
+    final circles = <CircleMarker>[];
     for (final q in qsos) {
       final ll = gridToLatLng(q.gridsquare);
       if (ll == null) continue;
-      final d = const Distance().as(LengthUnit.Kilometer, me, ll);
-      if (d > maxKm) maxKm = d;
-    }
-    if (maxKm <= 0) return const SizedBox.shrink();
-    return CircleLayer(circles: [
-      CircleMarker(
-        point: me,
-        radius: maxKm * 1000, // metres
+      points.add(ll);
+      circles.add(CircleMarker(
+        point: ll,
+        // 60 km base radius — bigger than a single grid square so nearby
+        // QSOs overlap into a heat gradient, but small enough that the map
+        // still shows structure.
+        radius: 60000,
         useRadiusInMeter: true,
-        color: color.withOpacity(0.05),
-        borderColor: color.withOpacity(0.55),
-        borderStrokeWidth: 1.2,
-      ),
-    ]);
+        color: _rstHeatColor(q.rstRcvd).withOpacity(0.22),
+        borderColor: _rstHeatColor(q.rstRcvd).withOpacity(0.45),
+        borderStrokeWidth: 0.6,
+      ));
+    }
+    if (points.isEmpty) return const [];
+
+    final hull = _convexHull(points);
+    // Ensure the hull encloses the home QTH too so the shape is anchored
+    // to the user's location even if they've never worked their own city.
+    if (me != null && !_pointInHull(me, hull)) hull.add(me);
+
+    return [
+      if (hull.length >= 3)
+        PolygonLayer(polygons: [
+          Polygon(
+            points: _convexHull(hull), // re-hull after possibly adding `me`
+            color: const Color(0xFF00E5FF).withOpacity(0.05),
+            borderColor: const Color(0xFF00E5FF).withOpacity(0.55),
+            borderStrokeWidth: 1.2,
+          ),
+        ]),
+      CircleLayer(circles: circles),
+    ];
+  }
+
+  /// Map an ADIF "RST received" string (e.g. "-12", "+03") to a colour on
+  /// a red→yellow→green→cyan gradient.  Weak = red, strong = cyan.
+  Color _rstHeatColor(String? rst) {
+    final n = rst == null
+        ? null
+        : int.tryParse(rst.trim().replaceAll(RegExp(r'[^-0-9]'), ''));
+    if (n == null) return const Color(0xFF888888); // neutral grey when no report
+    final clamped = n.clamp(-30, 10).toDouble();
+    final t = (clamped + 30) / 40.0; // 0..1
+    // Piecewise interpolation red → orange → yellow → green → cyan.
+    Color lerp(Color a, Color b, double x) => Color.lerp(a, b, x.clamp(0, 1))!;
+    if (t < 0.33) return lerp(const Color(0xFFFF3B4E), const Color(0xFFFFB000), t / 0.33);
+    if (t < 0.66) return lerp(const Color(0xFFFFB000), const Color(0xFF00FF88), (t - 0.33) / 0.33);
+    return           lerp(const Color(0xFF00FF88), const Color(0xFF00E5FF), (t - 0.66) / 0.34);
+  }
+
+  /// Andrew's monotone-chain convex hull. O(n log n). Returns points ordered
+  /// counter-clockwise (last point ≠ first).
+  List<LatLng> _convexHull(List<LatLng> input) {
+    if (input.length <= 2) return List.of(input);
+    final pts = List<LatLng>.from(input)
+      ..sort((a, b) => a.longitude != b.longitude
+          ? a.longitude.compareTo(b.longitude)
+          : a.latitude.compareTo(b.latitude));
+    double cross(LatLng o, LatLng a, LatLng b) =>
+        (a.longitude - o.longitude) * (b.latitude - o.latitude) -
+        (a.latitude  - o.latitude)  * (b.longitude - o.longitude);
+    final lower = <LatLng>[];
+    for (final p in pts) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower.last, p) <= 0) {
+        lower.removeLast();
+      }
+      lower.add(p);
+    }
+    final upper = <LatLng>[];
+    for (final p in pts.reversed) {
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper.last, p) <= 0) {
+        upper.removeLast();
+      }
+      upper.add(p);
+    }
+    lower.removeLast();
+    upper.removeLast();
+    return [...lower, ...upper];
+  }
+
+  /// Very cheap point-in-polygon (ray casting). Good enough to decide if
+  /// we need to expand the hull to include the home QTH.
+  bool _pointInHull(LatLng p, List<LatLng> poly) {
+    if (poly.length < 3) return false;
+    var inside = false;
+    for (int i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      final xi = poly[i].longitude, yi = poly[i].latitude;
+      final xj = poly[j].longitude, yj = poly[j].latitude;
+      final intersect = ((yi > p.latitude) != (yj > p.latitude)) &&
+          (p.longitude < (xj - xi) * (p.latitude - yi) / (yj - yi + 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
 
   String _shortHm(DateTime dt) {

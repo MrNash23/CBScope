@@ -20,6 +20,7 @@ class QsoBookApp extends ConsumerWidget {
     return prefs.when(
       data: (_) {
         final theme = ref.watch(settingsProvider).theme;
+        final accent = ref.watch(settingsProvider).themeAccent;
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'CBScope',
@@ -28,8 +29,8 @@ class QsoBookApp extends ConsumerWidget {
             ThemeModePref.light  => ThemeMode.light,
             ThemeModePref.dark   => ThemeMode.dark,
           },
-          theme: AppTheme.light(),
-          darkTheme: AppTheme.dark(),
+          theme: AppTheme.light(accent: accent),
+          darkTheme: AppTheme.dark(accent: accent),
           home: const _Shell(),
         );
       },

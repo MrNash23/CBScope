@@ -19,28 +19,42 @@ class AppTheme {
   // when a page is otherwise blue/cyan.
   static const _tronGreen = Color(0xFF00FF88);
 
-  static ThemeData dark() => _base(
+  /// Available accent colours the user can pick in Settings. First entry is
+  /// the app default; keeping cyan there ensures existing installations
+  /// don't visually shift after upgrade.
+  static const List<Color> accentPalette = [
+    Color(0xFF00E5FF), // Tron cyan (default)
+    Color(0xFF49FF7A), // classic mint green (previous default)
+    Color(0xFFFFB000), // amber
+    Color(0xFFFF6A00), // Tron orange
+    Color(0xFFFF3D8A), // hot pink
+    Color(0xFFB565FF), // purple
+    Color(0xFF4AA3FF), // sky blue
+    Color(0xFFFFFFFF), // stark white
+  ];
+
+  static ThemeData dark({Color? accent}) => _base(
         brightness: Brightness.dark,
         surface: _bgDark,
         card:    const Color(0xFF0A1218),
         border:  const Color(0xFF1F4A5A),
         text:    _paleFg,
         subtle:  const Color(0xFF6EA0B8),
-        accent:  _cyan,
+        accent:  accent ?? _cyan,
         secondary: _cyanSoft,
         success: _tronGreen,
         warning: const Color(0xFFFFB000),
         danger:  const Color(0xFFFF3B4E),
       );
 
-  static ThemeData light() => _base(
+  static ThemeData light({Color? accent}) => _base(
         brightness: Brightness.light,
         surface: const Color(0xFFEDF3F5),
         card:    const Color(0xFFFFFFFF),
         border:  const Color(0xFF2E5A6A),
         text:    const Color(0xFF061218),
         subtle:  const Color(0xFF3E606E),
-        accent:  const Color(0xFF00778C),
+        accent:  accent ?? const Color(0xFF00778C),
         secondary: const Color(0xFF006B7A),
         success: const Color(0xFF00694A),
         warning: const Color(0xFF9E5A00),

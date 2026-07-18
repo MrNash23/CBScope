@@ -510,6 +510,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(width: 140, child: Text('Accent color', style: Theme.of(context).textTheme.bodyMedium)),
+                  Expanded(
+                    child: ColorSwatchPicker(
+                      palette: AppTheme.accentPalette,
+                      selected: ref.watch(settingsProvider).themeAccent ?? AppTheme.accentPalette.first,
+                      onChanged: (v) {
+                        final s = ref.read(settingsProvider);
+                        ref.read(settingsProvider.notifier).update(s.copyWith(themeAccent: v));
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
                 children: [
                   SizedBox(width: 140, child: Text('Theme', style: Theme.of(context).textTheme.bodyMedium)),
                   Expanded(
