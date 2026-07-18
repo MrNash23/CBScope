@@ -29,7 +29,7 @@ class _BackupSection extends ConsumerWidget {
           Text(
             'Exports every QSO in your local logbook as CSV (RFC 4180). '
             'Includes all current fields plus the raw_fields JSON so the file '
-            'is a complete snapshot — future datapoints show up automatically.',
+            'is a complete snapshot.',
             style: t.bodySmall,
           ),
           const SizedBox(height: 12),

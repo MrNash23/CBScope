@@ -3,8 +3,11 @@
 // The application's name (shown in the menu bar, dock tooltip, About dialog).
 PRODUCT_NAME = CBScope
 
-// The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = net.xzgroup.cbscope
+// The application's bundle identifier.
+// NOTE: keep this pinned to the original id so macOS SharedPreferences and
+// the Drift DB (both stored under ~/Library/.../<bundle-id>) stay attached
+// to existing user data. The user-visible name is PRODUCT_NAME above.
+PRODUCT_BUNDLE_IDENTIFIER = com.qsobook.qsoBook
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 XZGROUP. All rights reserved.
