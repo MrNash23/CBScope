@@ -60,6 +60,7 @@ class AppSettings {
   final Color pskColor;
   final Color meColor;
   final MapStyle mapStyle;
+  final bool mapGreylineEnabled;
 
   /// Theme accent chosen from [AppTheme.accentPalette]. `null` keeps the
   /// theme's built-in default (Tron cyan in dark, dark cyan in light).
@@ -85,6 +86,7 @@ class AppSettings {
     required this.pskColor,
     required this.meColor,
     required this.mapStyle,
+    required this.mapGreylineEnabled,
     this.themeAccent,
   });
 
@@ -108,6 +110,7 @@ class AppSettings {
     Color? pskColor,
     Color? meColor,
     MapStyle? mapStyle,
+    bool? mapGreylineEnabled,
     Color? themeAccent,
     bool clearMulticast = false,
     bool clearAdifPath = false,
@@ -134,6 +137,7 @@ class AppSettings {
         pskColor: pskColor ?? this.pskColor,
         meColor: meColor ?? this.meColor,
         mapStyle: mapStyle ?? this.mapStyle,
+        mapGreylineEnabled: mapGreylineEnabled ?? this.mapGreylineEnabled,
         themeAccent:
             clearThemeAccent ? null : (themeAccent ?? this.themeAccent),
       );
@@ -229,6 +233,7 @@ class SettingsController extends StateNotifier<AppSettings> {
           meColor: Color(prefs.getInt('color.me') ?? MarkerColors.me.value),
           mapStyle: MapStyle
               .values[prefs.getInt('mapStyle') ?? MapStyle.cbscopeRetro.index],
+          mapGreylineEnabled: prefs.getBool('map.greylineEnabled') ?? false,
           themeAccent: prefs.containsKey('themeAccent')
               ? Color(prefs.getInt('themeAccent')!)
               : null,
@@ -263,6 +268,10 @@ class SettingsController extends StateNotifier<AppSettings> {
     await prefs.setInt('color.psk', next.pskColor.value);
     await prefs.setInt('color.me', next.meColor.value);
     await prefs.setInt('mapStyle', next.mapStyle.index);
+    await prefs.setBool(
+      'map.greylineEnabled',
+      next.mapGreylineEnabled,
+    );
     if (next.themeAccent == null) {
       await prefs.remove('themeAccent');
     } else {

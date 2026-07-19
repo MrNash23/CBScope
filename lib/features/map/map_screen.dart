@@ -75,6 +75,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void initState() {
     super.initState();
+    _showGreyline = ref.read(settingsProvider).mapGreylineEnabled;
     // 200 ms tick: drives both the live-decode fade AND the flowing PSK dots.
     _fadeTick = Timer.periodic(
       const Duration(milliseconds: 200),
@@ -473,17 +474,30 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 _hoverRadioId = equipment.hoverRadioId;
                 _hoverAntennaId = equipment.hoverAntennaId;
               }),
-              onChanged: (next) => setState(() {
-                _showQsos = next.showQsos;
-                _showDecodes = next.showDecodes;
-                _showLines = next.showLines;
-                _showMe = next.showMe;
-                _showPskSpots = next.showPskSpots;
-                _showGreyline = next.showGreyline;
-                _ageFilter = next.ageFilter;
-                _ageCustomMinutes = next.ageCustomMinutes;
-                _minSnr = next.minSnr;
-              }),
+              onChanged: (next) {
+                final greylineChanged = next.showGreyline != _showGreyline;
+                setState(() {
+                  _showQsos = next.showQsos;
+                  _showDecodes = next.showDecodes;
+                  _showLines = next.showLines;
+                  _showMe = next.showMe;
+                  _showPskSpots = next.showPskSpots;
+                  _showGreyline = next.showGreyline;
+                  _ageFilter = next.ageFilter;
+                  _ageCustomMinutes = next.ageCustomMinutes;
+                  _minSnr = next.minSnr;
+                });
+                if (greylineChanged) {
+                  final settings = ref.read(settingsProvider);
+                  unawaited(
+                    ref.read(settingsProvider.notifier).update(
+                          settings.copyWith(
+                            mapGreylineEnabled: next.showGreyline,
+                          ),
+                        ),
+                  );
+                }
+              },
               onClose: () => setState(() {
                 _filtersOpen = false;
                 _pinnedRadioId = null;
