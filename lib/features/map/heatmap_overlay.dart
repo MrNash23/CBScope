@@ -92,14 +92,15 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       maxY = math.max(maxY, sample.point.dy);
     }
 
-    // Leave enough room to expand and round the hull while keeping all
-    // measured points safely inside the final propagation envelope.
+    // Leave enough room for the complete exterior propagation cloud. Tight
+    // raster bounds clip a correct feather and turn it back into a hard edge
+    // when flutter_map scales the overlay.
     final rawXSpan = math.max(maxX - minX, 0.0005);
     final rawYSpan = math.max(maxY - minY, 0.0005);
-    minX -= rawXSpan * 0.20;
-    maxX += rawXSpan * 0.20;
-    minY -= rawYSpan * 0.20;
-    maxY += rawYSpan * 0.20;
+    minX -= rawXSpan * 0.34;
+    maxX += rawXSpan * 0.34;
+    minY -= rawYSpan * 0.34;
+    maxY += rawYSpan * 0.34;
 
     final xSpan = math.max(maxX - minX, 0.0001);
     final ySpan = math.max(maxY - minY, 0.0001);
@@ -147,14 +148,19 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       projectedHull = bufferedHull;
     }
     final pixels = Uint8List(width * height * 4);
-    const edgeFeatherPx = 26.0;
+    // A broad Gaussian halo reads as a cloud at normal map zoom levels.
+    // At 3.5 sigma it is effectively transparent, so there is no visible
+    // secondary edge where raster generation stops.
+    const cloudSigmaPx = 34.0;
+    const cloudExtentPx = cloudSigmaPx * 3.5;
+    const innerFeatherPx = 30.0;
 
     for (var y = 0; y < height; y++) {
       for (var x = 0; x < width; x++) {
         final pixel = Offset(x + 0.5, y + 0.5);
         final inside = _insidePolygon(pixel, projectedHull);
         final edgeDistance = _distanceToPolygonEdge(pixel, projectedHull);
-        if (!inside && edgeDistance > edgeFeatherPx) continue;
+        if (!inside && edgeDistance > cloudExtentPx) continue;
 
         var weightedReport = 0.0;
         var totalWeight = 0.0;
@@ -179,17 +185,22 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
           0.35,
           1.0,
         );
-        // Feather across the boundary rather than starting the fade exactly
-        // outside it. The mask is 50% at the mathematical outline, rises
-        // smoothly to solid colour on the inside and falls smoothly to zero
-        // outside. This removes the visible hard contour completely.
-        final edgeProgress = _smoothStep(
-          0,
-          edgeFeatherPx,
-          edgeDistance,
-        );
-        final edgeFade =
-            inside ? 0.5 + edgeProgress * 0.5 : 0.5 * (1 - edgeProgress);
+        // The mathematical outline sits inside one continuous cloud: it is
+        // already translucent there, becomes solid inward and decays with a
+        // true Gaussian outward.
+        final edgeFade = inside
+            ? 0.72 +
+                0.28 *
+                    _smoothStep(
+                      0,
+                      innerFeatherPx,
+                      edgeDistance,
+                    )
+            : 0.72 *
+                math.exp(
+                  -(edgeDistance * edgeDistance) /
+                      (2 * cloudSigmaPx * cloudSigmaPx),
+                );
         final argb = color.toARGB32();
         final offset = (y * width + x) * 4;
         pixels[offset] = (argb >> 16) & 0xff;
