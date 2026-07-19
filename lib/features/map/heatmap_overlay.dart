@@ -92,28 +92,27 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       maxY = math.max(maxY, sample.point.dy);
     }
 
-    // Leave enough room for the complete exterior propagation cloud. Tight
-    // raster bounds clip a correct feather and turn it back into a hard edge
-    // when flutter_map scales the overlay.
+    // Reserve a guaranteed pixel margin around the measured area. Percentage
+    // padding fails for tall or narrow footprints because the Gaussian cloud
+    // can be wider than the short raster side and gets visibly clipped.
     final rawXSpan = math.max(maxX - minX, 0.0005);
     final rawYSpan = math.max(maxY - minY, 0.0005);
-    minX -= rawXSpan * 0.34;
-    maxX += rawXSpan * 0.34;
-    minY -= rawYSpan * 0.34;
-    maxY += rawYSpan * 0.34;
+    const innerLongestSide = 640.0;
+    const rasterPadding = 164.0;
+    final pixelsPerMercatorUnit =
+        innerLongestSide / math.max(rawXSpan, rawYSpan);
+    final innerWidth = math.max(1.0, rawXSpan * pixelsPerMercatorUnit);
+    final innerHeight = math.max(1.0, rawYSpan * pixelsPerMercatorUnit);
 
-    final xSpan = math.max(maxX - minX, 0.0001);
-    final ySpan = math.max(maxY - minY, 0.0001);
-    final aspect = xSpan / ySpan;
-    const longestSide = 640;
-    final width = math.max(
-      160,
-      aspect >= 1 ? longestSide : (longestSide * aspect).round(),
-    );
-    final height = math.max(
-      160,
-      aspect >= 1 ? (longestSide / aspect).round() : longestSide,
-    );
+    minX -= rasterPadding / pixelsPerMercatorUnit;
+    maxX += rasterPadding / pixelsPerMercatorUnit;
+    minY -= rasterPadding / pixelsPerMercatorUnit;
+    maxY += rasterPadding / pixelsPerMercatorUnit;
+
+    final xSpan = maxX - minX;
+    final ySpan = maxY - minY;
+    final width = (innerWidth + rasterPadding * 2).ceil();
+    final height = (innerHeight + rasterPadding * 2).ceil();
 
     Offset project(Offset point) => Offset(
           (point.dx - minX) / xSpan * (width - 1),
