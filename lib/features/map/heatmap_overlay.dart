@@ -142,12 +142,12 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       maxY = math.max(maxY, sample.point.dy);
     }
 
-    // Each station cloud reaches exactly [cloudRadius] pixels and is fully
-    // transparent there. Extra padding prevents image resampling from clipping
-    // that final transparent ring.
+    // Each station uses a long Gaussian tail. At 3.5 sigma it is already
+    // visually transparent, so stopping there cannot reveal a circular edge.
     const innerLongestSide = 640.0;
-    const cloudRadius = 142.0;
-    const rasterPadding = cloudRadius + 10;
+    const cloudSigma = 60.0;
+    const cloudExtent = cloudSigma * 3.5;
+    const rasterPadding = cloudExtent + 12;
     final rawXSpan = math.max(maxX - minX, 0.0005);
     final rawYSpan = math.max(maxY - minY, 0.0005);
     final pixelsPerMercatorUnit =
@@ -174,24 +174,26 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
     final weightedReports = Float32List(pixelCount);
     final totalWeights = Float32List(pixelCount);
     final maximumOpacity = Float32List(pixelCount);
-    const radiusSquared = cloudRadius * cloudRadius;
+    const extentSquared = cloudExtent * cloudExtent;
 
     // Accumulate only inside each cloud's bounding box. Report values are
     // averaged by radial influence; opacity uses max(), never addition.
     for (final sample in mercatorSamples) {
       final center = project(sample.point);
-      final left = math.max(0, (center.dx - cloudRadius).floor());
-      final right = math.min(width - 1, (center.dx + cloudRadius).ceil());
-      final top = math.max(0, (center.dy - cloudRadius).floor());
-      final bottom = math.min(height - 1, (center.dy + cloudRadius).ceil());
+      final left = math.max(0, (center.dx - cloudExtent).floor());
+      final right = math.min(width - 1, (center.dx + cloudExtent).ceil());
+      final top = math.max(0, (center.dy - cloudExtent).floor());
+      final bottom = math.min(height - 1, (center.dy + cloudExtent).ceil());
       for (var y = top; y <= bottom; y++) {
         final dy = y + 0.5 - center.dy;
         for (var x = left; x <= right; x++) {
           final dx = x + 0.5 - center.dx;
           final distanceSquared = dx * dx + dy * dy;
-          if (distanceSquared >= radiusSquared) continue;
-          final normalizedDistance = math.sqrt(distanceSquared) / cloudRadius;
-          final influence = _cloudInfluence(normalizedDistance);
+          if (distanceSquared >= extentSquared) continue;
+          final influence = _cloudInfluence(
+            math.sqrt(distanceSquared),
+            cloudSigma,
+          );
           if (influence <= 0) continue;
           final index = y * width + x;
           weightedReports[index] += sample.report * influence;
@@ -313,17 +315,9 @@ double? _parseReport(String? raw) {
       .toDouble();
 }
 
-double _cloudInfluence(double normalizedDistance) {
-  if (normalizedDistance >= 1) return 0;
-  // Dense but soft centre, then a long tail that reaches exactly zero.
-  final gaussian = math.exp(-3 * normalizedDistance * normalizedDistance);
-  final cutoff = 1 - _smoothStep(0.68, 1, normalizedDistance);
-  return 0.72 * gaussian * cutoff;
-}
-
-double _smoothStep(double edge0, double edge1, double value) {
-  final t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-  return t * t * (3 - 2 * t);
+double _cloudInfluence(double distance, double sigma) {
+  final sigmaSquared = sigma * sigma;
+  return 0.72 * math.exp(-(distance * distance) / (2 * sigmaSquared));
 }
 
 Color _reportColor(double report) {
