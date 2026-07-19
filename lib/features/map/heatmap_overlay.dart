@@ -179,17 +179,17 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
           0.35,
           1.0,
         );
-        // Keep the measured area solid up to the boundary and render a real
-        // outer feather beyond it. Previously the fade happened only inside,
-        // which looked like a hard cut-out rather than a blurred edge.
-        final edgeFade = inside
-            ? 1.0
-            : 1 -
-                _smoothStep(
-                  0,
-                  edgeFeatherPx,
-                  edgeDistance,
-                );
+        // Feather across the boundary rather than starting the fade exactly
+        // outside it. The mask is 50% at the mathematical outline, rises
+        // smoothly to solid colour on the inside and falls smoothly to zero
+        // outside. This removes the visible hard contour completely.
+        final edgeProgress = _smoothStep(
+          0,
+          edgeFeatherPx,
+          edgeDistance,
+        );
+        final edgeFade =
+            inside ? 0.5 + edgeProgress * 0.5 : 0.5 * (1 - edgeProgress);
         final argb = color.toARGB32();
         final offset = (y * width + x) * 4;
         pixels[offset] = (argb >> 16) & 0xff;
