@@ -22,23 +22,23 @@ enum QsoAgeFilter { custom, last24h, week, month, year, all }
 
 extension QsoAgeFilterX on QsoAgeFilter {
   String get label => switch (this) {
-    QsoAgeFilter.custom => 'Custom',
-    QsoAgeFilter.last24h => 'Last 24 h',
-    QsoAgeFilter.week => 'Last week',
-    QsoAgeFilter.month => 'Last month',
-    QsoAgeFilter.year => 'Last year',
-    QsoAgeFilter.all => 'All time',
-  };
+        QsoAgeFilter.custom => 'Custom',
+        QsoAgeFilter.last24h => 'Last 24 h',
+        QsoAgeFilter.week => 'Last week',
+        QsoAgeFilter.month => 'Last month',
+        QsoAgeFilter.year => 'Last year',
+        QsoAgeFilter.all => 'All time',
+      };
   Duration? get maxAge => switch (this) {
-    QsoAgeFilter.custom => const Duration(
-      hours: 24,
-    ), // fallback, real value comes from slider
-    QsoAgeFilter.last24h => const Duration(hours: 24),
-    QsoAgeFilter.week => const Duration(days: 7),
-    QsoAgeFilter.month => const Duration(days: 30),
-    QsoAgeFilter.year => const Duration(days: 365),
-    QsoAgeFilter.all => null,
-  };
+        QsoAgeFilter.custom => const Duration(
+            hours: 24,
+          ), // fallback, real value comes from slider
+        QsoAgeFilter.last24h => const Duration(hours: 24),
+        QsoAgeFilter.week => const Duration(days: 7),
+        QsoAgeFilter.month => const Duration(days: 30),
+        QsoAgeFilter.year => const Duration(days: 365),
+        QsoAgeFilter.all => null,
+      };
 }
 
 class MapScreen extends ConsumerStatefulWidget {
@@ -112,16 +112,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final meColor = mySettings.meColor;
     final previewRadioId = _hoverRadioId ?? _pinnedRadioId;
     final previewAntennaId = _hoverAntennaId ?? _pinnedAntennaId;
-    final heatmapQsos = allQsos
-        .where((qso) {
-          if (previewRadioId != null && qso.radioId != previewRadioId)
-            return false;
-          if (previewAntennaId != null && qso.antennaId != previewAntennaId) {
-            return false;
-          }
-          return true;
-        })
-        .toList(growable: false);
+    final heatmapQsos = allQsos.where((qso) {
+      if (previewRadioId != null && qso.radioId != previewRadioId) return false;
+      if (previewAntennaId != null && qso.antennaId != previewAntennaId) {
+        return false;
+      }
+      return true;
+    }).toList(growable: false);
 
     final now = DateTime.now();
     // Replay "now" is either the wallclock or the timeline scrubber value.
@@ -129,9 +126,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final ageMaxDur = _ageFilter == QsoAgeFilter.custom
         ? Duration(minutes: _ageCustomMinutes)
         : _ageFilter.maxAge;
-    final ageCutoff = ageMaxDur == null
-        ? null
-        : effectiveNow.subtract(ageMaxDur);
+    final ageCutoff =
+        ageMaxDur == null ? null : effectiveNow.subtract(ageMaxDur);
 
     final qsoMarkers = <Marker>[];
     if (_showQsos) {
@@ -181,8 +177,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final distKm = myLatLng == null
             ? null
             : const Distance().as(LengthUnit.Kilometer, myLatLng, ll);
-        final isNewCq =
-            d.decode.message.trim().startsWith('CQ ') &&
+        final isNewCq = d.decode.message.trim().startsWith('CQ ') &&
             !workedCalls.contains(call.toUpperCase());
         decodeMarkers.add(
           Marker(
@@ -339,8 +334,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 label: pskLoading && pskMarkers.isEmpty
                     ? 'PSK…'
                     : '${pskMarkers.length} PSK',
-                active:
-                    _showPskSpots &&
+                active: _showPskSpots &&
                     mySettings.pskSpotDirection != PskSpotDirection.off,
                 onTap: () => setState(() => _showPskSpots = !_showPskSpots),
               ),
@@ -364,9 +358,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               _pill(
                 icon: Icons.history,
                 color: c.text,
-                label: _replayEnabled
-                    ? 'Replay ${_shortHm(_replayAt)}'
-                    : 'Replay',
+                label:
+                    _replayEnabled ? 'Replay ${_shortHm(_replayAt)}' : 'Replay',
                 active: _replayEnabled,
                 onTap: () {
                   setState(() {
@@ -664,8 +657,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     for (int i = 0, j = poly.length - 1; i < poly.length; j = i++) {
       final xi = poly[i].longitude, yi = poly[i].latitude;
       final xj = poly[j].longitude, yj = poly[j].latitude;
-      final intersect =
-          ((yi > p.latitude) != (yj > p.latitude)) &&
+      final intersect = ((yi > p.latitude) != (yj > p.latitude)) &&
           (p.longitude <
               (xj - xi) * (p.latitude - yi) / (yj - yi + 1e-12) + xi);
       if (intersect) inside = !inside;
@@ -745,8 +737,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             Text(
               label,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: active ? c.text : c.subtle,
-              ),
+                    color: active ? c.text : c.subtle,
+                  ),
             ),
           ],
         ),
@@ -971,6 +963,13 @@ class _FilterPanel extends ConsumerWidget {
                         ),
                     ],
                   ),
+                  if (settings.pskSpotWindow == PskSpotWindow.d7) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '7 d combines the local rolling cache with a bounded recent API sync.',
+                      style: t.bodySmall?.copyWith(color: c.subtle),
+                    ),
+                  ],
                   if (settings.pskSpotWindow == PskSpotWindow.custom) ...[
                     const SizedBox(height: 6),
                     Row(
@@ -985,9 +984,7 @@ class _FilterPanel extends ConsumerWidget {
                             divisions: 59,
                             label: '${settings.pskSpotCustomMinutes} min',
                             onChanged: (v) {
-                              ref
-                                  .read(settingsProvider.notifier)
-                                  .update(
+                              ref.read(settingsProvider.notifier).update(
                                     settings.copyWith(
                                       pskSpotCustomMinutes: v.round(),
                                     ),
@@ -1123,11 +1120,11 @@ class _FilterPanel extends ConsumerWidget {
   }
 
   String _pskDirLabel(PskSpotDirection d) => switch (d) {
-    PskSpotDirection.off => 'Off',
-    PskSpotDirection.sent => 'Heard me',
-    PskSpotDirection.received => 'I heard',
-    PskSpotDirection.both => 'Both',
-  };
+        PskSpotDirection.off => 'Off',
+        PskSpotDirection.sent => 'Heard me',
+        PskSpotDirection.received => 'I heard',
+        PskSpotDirection.both => 'Both',
+      };
 
   Widget _section(BuildContext context, String label) =>
       Text(label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall);
@@ -1137,17 +1134,18 @@ class _FilterPanel extends ConsumerWidget {
     String label,
     bool value,
     ValueChanged<bool> onChanged,
-  ) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+  ) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            ),
+            Switch.adaptive(value: value, onChanged: onChanged),
+          ],
         ),
-        Switch.adaptive(value: value, onChanged: onChanged),
-      ],
-    ),
-  );
+      );
 
   Widget _chipToggle(
     BuildContext context,
@@ -1703,16 +1701,13 @@ class _EquipmentHeatmapControls extends ConsumerWidget {
     }) {
       onChanged(
         _EquipmentPreviewState(
-          pinnedRadioId: clearPinnedRadio
-              ? null
-              : (pinnedRadio ?? pinnedRadioId),
-          pinnedAntennaId: clearPinnedAntenna
-              ? null
-              : (pinnedAntenna ?? pinnedAntennaId),
+          pinnedRadioId:
+              clearPinnedRadio ? null : (pinnedRadio ?? pinnedRadioId),
+          pinnedAntennaId:
+              clearPinnedAntenna ? null : (pinnedAntenna ?? pinnedAntennaId),
           hoverRadioId: clearHoverRadio ? null : (hoverRadio ?? hoverRadioId),
-          hoverAntennaId: clearHoverAntenna
-              ? null
-              : (hoverAntenna ?? hoverAntennaId),
+          hoverAntennaId:
+              clearHoverAntenna ? null : (hoverAntenna ?? hoverAntennaId),
         ),
       );
     }
@@ -2032,11 +2027,11 @@ class _DecodeMarker extends StatelessWidget {
                   child: Text(
                     'NEW CQ',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Colors.black,
-                      fontSize: 8,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.6,
-                    ),
+                          color: Colors.black,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.6,
+                        ),
                   ),
                 ),
                 const SizedBox(height: 3),

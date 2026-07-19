@@ -83,7 +83,8 @@ class PskReporterClient {
       'rronly': '1',
     });
 
-    return _getWithRetry(uri, (body) => _parseNewestReport(body, callsign), null);
+    return _getWithRetry(
+        uri, (body) => _parseNewestReport(body, callsign), null);
   }
 
   /// Fetch all recent reports where [myCall] appears in the given [direction].
@@ -99,24 +100,61 @@ class PskReporterClient {
     required PskDirection direction,
     Duration since = const Duration(hours: 6),
   }) async {
-    await _throttle();
+    // The public API explicitly rejects lookbacks over 24h and often times
+    // out on expensive 24h callsign queries. Longer CBScope views therefore
+    // come from our rolling cache; the fresh sync uses a bounded 6h window
+    // and progressively falls back when PSK Reporter's backend is busy.
+    final requested =
+        since > const Duration(hours: 6) ? const Duration(hours: 6) : since;
+    final windows = <Duration>[
+      requested,
+      if (requested > const Duration(hours: 1)) const Duration(hours: 1),
+      if (requested > const Duration(minutes: 15)) const Duration(minutes: 15),
+    ];
 
-    final flowSecs = -since.inSeconds;
-    final params = <String, String>{
-      'flowStartSeconds': '$flowSecs',
-      'rronly': '1',
-      if (direction == PskDirection.sent)     'senderCallsign':   myCall.toUpperCase(),
-      if (direction == PskDirection.received) 'receiverCallsign': myCall.toUpperCase(),
-    };
-    final uri = Uri.https('retrieve.pskreporter.info', '/query', params);
-
-    return _getWithRetry(uri, (body) => _parseSpots(body, myCall, direction), const []);
+    Object? lastError;
+    for (final window in windows.toSet()) {
+      await _throttle();
+      final params = <String, String>{
+        'flowStartSeconds': '${-window.inSeconds}',
+        'rronly': '1',
+        'rptlimit': '5000',
+        // CBScope is specifically an 11m FT8 application. These constraints
+        // materially reduce load on PSK Reporter's shared query service.
+        'mode': 'FT8',
+        'frange': '26000000-28000000',
+        if (direction == PskDirection.sent)
+          'senderCallsign': myCall.toUpperCase(),
+        if (direction == PskDirection.received)
+          'receiverCallsign': myCall.toUpperCase(),
+      };
+      final uri = Uri.https('retrieve.pskreporter.info', '/query', params);
+      try {
+        return await _getWithRetry(
+          uri,
+          (body) => _parseSpots(body, myCall, direction),
+          const [],
+          throwOnFailure: true,
+          maxAttempts: 1,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw PskReporterUnavailable(lastError);
   }
 
   /// GET [uri] with one retry on 503 / timeout. Uses long backoff so we
   /// don't hammer PSK Reporter (they aggressively 503 offending clients).
-  Future<T> _getWithRetry<T>(Uri uri, T Function(String body) parse, T empty) async {
-    for (var attempt = 0; attempt < 2; attempt++) {
+  Future<T> _getWithRetry<T>(
+    Uri uri,
+    T Function(String body) parse,
+    T empty, {
+    bool throwOnFailure = false,
+    int maxAttempts = 2,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         final req = await _http.getUrl(uri).timeout(timeout);
         // PSK Reporter's server returns 503 for requests that carry Dart's
@@ -132,28 +170,40 @@ class PskReporterClient {
           final body = await resp.transform(utf8.decoder).join();
           return parse(body);
         }
-        if (resp.statusCode == 503 && attempt == 0) {
+        if (resp.statusCode == 503 && attempt < maxAttempts - 1) {
           // One long backoff, then give up — we'll try again on the next
           // 5-min poll cycle.
           await Future<void>.delayed(const Duration(seconds: 45));
           continue;
         }
+        if (throwOnFailure) {
+          throw HttpException(
+            'PSK Reporter HTTP ${resp.statusCode}',
+            uri: uri,
+          );
+        }
         return empty;
       } catch (e) {
-        if (attempt == 1) return empty;
+        lastError = e;
+        if (attempt == maxAttempts - 1) {
+          if (throwOnFailure) throw PskReporterUnavailable(lastError);
+          return empty;
+        }
         await Future<void>.delayed(const Duration(seconds: 30));
       }
     }
+    if (throwOnFailure) throw PskReporterUnavailable(lastError);
     return empty;
   }
 
-  List<PskSpot> _parseSpots(String body, String myCall, PskDirection direction) {
+  List<PskSpot> _parseSpots(
+      String body, String myCall, PskDirection direction) {
     final out = <PskSpot>[];
     final me = myCall.toUpperCase();
     for (final r in _parseReceptionReportsXml(body)) {
-      final sender   = (r['senderCallsign']   ?? '').toUpperCase();
+      final sender = (r['senderCallsign'] ?? '').toUpperCase();
       final receiver = (r['receiverCallsign'] ?? '').toUpperCase();
-      final senderLoc   = (r['senderLocator']   ?? '').toUpperCase();
+      final senderLoc = (r['senderLocator'] ?? '').toUpperCase();
       final receiverLoc = (r['receiverLocator'] ?? '').toUpperCase();
       final ts = int.tryParse(r['flowStartSeconds'] ?? '0') ?? 0;
       final at = DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true);
@@ -208,7 +258,8 @@ class PskReport {
   final String callsign;
   final String grid;
   final DateTime at;
-  const PskReport({required this.callsign, required this.grid, required this.at});
+  const PskReport(
+      {required this.callsign, required this.grid, required this.at});
 }
 
 enum PskDirection { sent, received }
@@ -216,6 +267,7 @@ enum PskDirection { sent, received }
 class PskSpot {
   /// Callsign of the "other" party (not the user).
   final String otherCall;
+
   /// Locator of the other party (that's where we plot the marker).
   final String otherGrid;
   final PskDirection direction;
@@ -241,4 +293,13 @@ class PskReporterRateLimited implements Exception {
   const PskReporterRateLimited();
   @override
   String toString() => 'PskReporterRateLimited';
+}
+
+class PskReporterUnavailable implements Exception {
+  final Object? cause;
+  const PskReporterUnavailable([this.cause]);
+
+  @override
+  String toString() =>
+      'PskReporterUnavailable${cause == null ? '' : ': $cause'}';
 }

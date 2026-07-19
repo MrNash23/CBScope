@@ -26,9 +26,11 @@ final dbProvider = Provider<AppDatabase>((ref) {
   return db;
 });
 
-final qsoRepoProvider = Provider<QsoRepository>((ref) => QsoRepository(ref.watch(dbProvider)));
+final qsoRepoProvider =
+    Provider<QsoRepository>((ref) => QsoRepository(ref.watch(dbProvider)));
 
-final prefsProvider = FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
+final prefsProvider =
+    FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
 
 /// ---------------- Settings ----------------
 
@@ -45,8 +47,10 @@ class AppSettings {
   final AppMode appMode;
   final PskSpotDirection pskSpotDirection;
   final PskSpotWindow pskSpotWindow;
+
   /// Minutes for PskSpotWindow.custom (1-60).
   final int pskSpotCustomMinutes;
+
   /// When true we tail WSJT-CB's ADIF log in the background and import each
   /// new QSO into our own database, enriched with a solar/propagation
   /// snapshot taken at ingest time.
@@ -56,6 +60,7 @@ class AppSettings {
   final Color pskColor;
   final Color meColor;
   final MapStyle mapStyle;
+
   /// Theme accent chosen from [AppTheme.accentPalette]. `null` keeps the
   /// theme's built-in default (Tron cyan in dark, dark cyan in light).
   final Color? themeAccent;
@@ -111,7 +116,8 @@ class AppSettings {
       AppSettings(
         udpPort: udpPort ?? this.udpPort,
         bindAddress: bindAddress ?? this.bindAddress,
-        multicastGroup: clearMulticast ? null : (multicastGroup ?? this.multicastGroup),
+        multicastGroup:
+            clearMulticast ? null : (multicastGroup ?? this.multicastGroup),
         adifLogPath: clearAdifPath ? null : (adifLogPath ?? this.adifLogPath),
         myCall: myCall ?? this.myCall,
         myGrid: myGrid ?? this.myGrid,
@@ -123,17 +129,20 @@ class AppSettings {
         pskSpotWindow: pskSpotWindow ?? this.pskSpotWindow,
         pskSpotCustomMinutes: pskSpotCustomMinutes ?? this.pskSpotCustomMinutes,
         autoImportWsjtLog: autoImportWsjtLog ?? this.autoImportWsjtLog,
-        qsoColor:    qsoColor    ?? this.qsoColor,
+        qsoColor: qsoColor ?? this.qsoColor,
         decodeColor: decodeColor ?? this.decodeColor,
-        pskColor:    pskColor    ?? this.pskColor,
-        meColor:     meColor     ?? this.meColor,
-        mapStyle:    mapStyle    ?? this.mapStyle,
-        themeAccent: clearThemeAccent ? null : (themeAccent ?? this.themeAccent),
+        pskColor: pskColor ?? this.pskColor,
+        meColor: meColor ?? this.meColor,
+        mapStyle: mapStyle ?? this.mapStyle,
+        themeAccent:
+            clearThemeAccent ? null : (themeAccent ?? this.themeAccent),
       );
 }
 
 enum ThemeModePref { system, light, dark }
+
 enum DistanceUnit { km, mi }
+
 enum AppMode { cb, ham }
 
 /// Direction bitmask for PSK Reporter spot layer.
@@ -148,10 +157,10 @@ enum PskSpotWindow { custom, h1, h6, h24, d7 }
 
 /// Default marker colors — Tron-flavoured neon on the dark map.
 class MarkerColors {
-  static const qso    = Color(0xFF00E5FF); // electric cyan (accent)
+  static const qso = Color(0xFF00E5FF); // electric cyan (accent)
   static const decode = Color(0xFFFFB000); // amber
-  static const psk    = Color(0xFFFF00AA); // magenta
-  static const me     = Color(0xFF00FF88); // bright green (my station stands out)
+  static const psk = Color(0xFFFF00AA); // magenta
+  static const me = Color(0xFF00FF88); // bright green (my station stands out)
 }
 
 /// Preset palette shown in the color picker. Bright and distinct for a
@@ -170,18 +179,19 @@ const kMarkerPalette = <Color>[
 
 extension PskSpotWindowX on PskSpotWindow {
   Duration get duration => switch (this) {
-        PskSpotWindow.custom => const Duration(minutes: 15), // fallback when settings absent
-        PskSpotWindow.h1  => const Duration(hours: 1),
-        PskSpotWindow.h6  => const Duration(hours: 6),
+        PskSpotWindow.custom =>
+          const Duration(minutes: 15), // fallback when settings absent
+        PskSpotWindow.h1 => const Duration(hours: 1),
+        PskSpotWindow.h6 => const Duration(hours: 6),
         PskSpotWindow.h24 => const Duration(hours: 24),
-        PskSpotWindow.d7  => const Duration(days: 7),
+        PskSpotWindow.d7 => const Duration(days: 7),
       };
   String get label => switch (this) {
         PskSpotWindow.custom => 'Custom',
-        PskSpotWindow.h1  => 'Last 1 h',
-        PskSpotWindow.h6  => 'Last 6 h',
+        PskSpotWindow.h1 => 'Last 1 h',
+        PskSpotWindow.h6 => 'Last 6 h',
         PskSpotWindow.h24 => 'Last 24 h',
-        PskSpotWindow.d7  => 'Last 7 d',
+        PskSpotWindow.d7 => 'Last 7 d',
       };
 }
 
@@ -200,20 +210,28 @@ class SettingsController extends StateNotifier<AppSettings> {
           adifLogPath: prefs.getString('adifLogPath') ?? defaultWsjtxLogPath(),
           myCall: prefs.getString('myCall'),
           myGrid: prefs.getString('myGrid'),
-          theme: ThemeModePref.values[prefs.getInt('theme') ?? ThemeModePref.dark.index],
+          theme: ThemeModePref
+              .values[prefs.getInt('theme') ?? ThemeModePref.dark.index],
           distanceUnit: DistanceUnit.values[prefs.getInt('distanceUnit') ?? 0],
           pskReporterLookup: prefs.getBool('pskReporterLookup') ?? true,
           appMode: AppMode.values[prefs.getInt('appMode') ?? 0],
-          pskSpotDirection: PskSpotDirection.values[prefs.getInt('pskSpotDirection') ?? 0],
-          pskSpotWindow: PskSpotWindow.values[prefs.getInt('pskSpotWindow') ?? PskSpotWindow.h6.index],
-          pskSpotCustomMinutes: (prefs.getInt('pskSpotCustomMinutes') ?? 15).clamp(1, 60),
+          pskSpotDirection:
+              PskSpotDirection.values[prefs.getInt('pskSpotDirection') ?? 0],
+          pskSpotWindow: PskSpotWindow
+              .values[prefs.getInt('pskSpotWindow') ?? PskSpotWindow.h6.index],
+          pskSpotCustomMinutes:
+              (prefs.getInt('pskSpotCustomMinutes') ?? 15).clamp(1, 60),
           autoImportWsjtLog: prefs.getBool('autoImportWsjtLog') ?? true,
-          qsoColor:    Color(prefs.getInt('color.qso')    ?? MarkerColors.qso.value),
-          decodeColor: Color(prefs.getInt('color.decode') ?? MarkerColors.decode.value),
-          pskColor:    Color(prefs.getInt('color.psk')    ?? MarkerColors.psk.value),
-          meColor:     Color(prefs.getInt('color.me')     ?? MarkerColors.me.value),
-          mapStyle:    MapStyle.values[prefs.getInt('mapStyle') ?? MapStyle.cbscopeRetro.index],
-          themeAccent: prefs.containsKey('themeAccent') ? Color(prefs.getInt('themeAccent')!) : null,
+          qsoColor: Color(prefs.getInt('color.qso') ?? MarkerColors.qso.value),
+          decodeColor:
+              Color(prefs.getInt('color.decode') ?? MarkerColors.decode.value),
+          pskColor: Color(prefs.getInt('color.psk') ?? MarkerColors.psk.value),
+          meColor: Color(prefs.getInt('color.me') ?? MarkerColors.me.value),
+          mapStyle: MapStyle
+              .values[prefs.getInt('mapStyle') ?? MapStyle.cbscopeRetro.index],
+          themeAccent: prefs.containsKey('themeAccent')
+              ? Color(prefs.getInt('themeAccent')!)
+              : null,
         ));
 
   Future<void> update(AppSettings next) async {
@@ -240,11 +258,11 @@ class SettingsController extends StateNotifier<AppSettings> {
     await prefs.setInt('pskSpotWindow', next.pskSpotWindow.index);
     await prefs.setInt('pskSpotCustomMinutes', next.pskSpotCustomMinutes);
     await prefs.setBool('autoImportWsjtLog', next.autoImportWsjtLog);
-    await prefs.setInt('color.qso',    next.qsoColor.value);
+    await prefs.setInt('color.qso', next.qsoColor.value);
     await prefs.setInt('color.decode', next.decodeColor.value);
-    await prefs.setInt('color.psk',    next.pskColor.value);
-    await prefs.setInt('color.me',     next.meColor.value);
-    await prefs.setInt('mapStyle',     next.mapStyle.index);
+    await prefs.setInt('color.psk', next.pskColor.value);
+    await prefs.setInt('color.me', next.meColor.value);
+    await prefs.setInt('mapStyle', next.mapStyle.index);
     if (next.themeAccent == null) {
       await prefs.remove('themeAccent');
     } else {
@@ -253,34 +271,39 @@ class SettingsController extends StateNotifier<AppSettings> {
   }
 }
 
-final settingsProvider = StateNotifierProvider<SettingsController, AppSettings>((ref) {
+final settingsProvider =
+    StateNotifierProvider<SettingsController, AppSettings>((ref) {
   final prefs = ref.watch(prefsProvider).requireValue;
   return SettingsController(prefs);
 });
 
 String? defaultWsjtxLogPath() {
-  final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+  final home =
+      Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
   if (home == null) return null;
   // Try WSJT-CB first (11m community fork), fall back to stock WSJT-X.
   final candidates = <String>[];
   if (Platform.isMacOS) {
     candidates.addAll([
-      p.join(home, 'Library', 'Application Support', 'WSJT-CB', 'wsjtcb_log.adi'),
-      p.join(home, 'Library', 'Application Support', 'WSJT-CB', 'wsjtx_log.adi'),
-      p.join(home, 'Library', 'Application Support', 'WSJT-X',  'wsjtx_log.adi'),
+      p.join(
+          home, 'Library', 'Application Support', 'WSJT-CB', 'wsjtcb_log.adi'),
+      p.join(
+          home, 'Library', 'Application Support', 'WSJT-CB', 'wsjtx_log.adi'),
+      p.join(home, 'Library', 'Application Support', 'WSJT-X', 'wsjtx_log.adi'),
     ]);
   } else if (Platform.isWindows) {
-    final la = Platform.environment['LOCALAPPDATA'] ?? p.join(home, 'AppData', 'Local');
+    final la = Platform.environment['LOCALAPPDATA'] ??
+        p.join(home, 'AppData', 'Local');
     candidates.addAll([
       p.join(la, 'WSJT-CB', 'wsjtcb_log.adi'),
       p.join(la, 'WSJT-CB', 'wsjtx_log.adi'),
-      p.join(la, 'WSJT-X',  'wsjtx_log.adi'),
+      p.join(la, 'WSJT-X', 'wsjtx_log.adi'),
     ]);
   } else {
     candidates.addAll([
       p.join(home, '.local', 'share', 'WSJT-CB', 'wsjtcb_log.adi'),
       p.join(home, '.local', 'share', 'WSJT-CB', 'wsjtx_log.adi'),
-      p.join(home, '.local', 'share', 'WSJT-X',  'wsjtx_log.adi'),
+      p.join(home, '.local', 'share', 'WSJT-X', 'wsjtx_log.adi'),
     ]);
   }
   for (final c in candidates) {
@@ -309,7 +332,8 @@ final wsjtxMessagesProvider = StreamProvider<WsjtxMessage>((ref) {
   return ref.watch(udpListenerProvider).messages;
 });
 
-final wsjtxStatusProvider = StateNotifierProvider<_StatusCtrl, WsjtxStatus?>((ref) {
+final wsjtxStatusProvider =
+    StateNotifierProvider<_StatusCtrl, WsjtxStatus?>((ref) {
   final ctrl = _StatusCtrl();
   ref.listen(wsjtxMessagesProvider, (_, next) {
     next.whenData((m) {
@@ -330,7 +354,8 @@ class LiveDecode {
   const LiveDecode(this.decode, this.receivedAt);
 }
 
-final liveDecodesProvider = StateNotifierProvider<_DecodesCtrl, List<LiveDecode>>((ref) {
+final liveDecodesProvider =
+    StateNotifierProvider<_DecodesCtrl, List<LiveDecode>>((ref) {
   final ctrl = _DecodesCtrl();
   ref.listen(wsjtxMessagesProvider, (_, next) {
     next.whenData((m) {
@@ -352,7 +377,11 @@ class _DecodesCtrl extends StateNotifier<List<LiveDecode>> {
     }
     state = List.unmodifiable(_q);
   }
-  void clear() { _q.clear(); state = const []; }
+
+  void clear() {
+    _q.clear();
+    state = const [];
+  }
 }
 
 /// Bridge UDP → DB: QsoLogged messages are persisted. Decodes that carry
@@ -389,8 +418,10 @@ final qsoLoggedIngestProvider = Provider<void>((ref) {
         }
       } else if (m is WsjtxStatus) {
         final s = ref.read(settingsProvider);
-        final needsCall = (s.myCall == null || s.myCall!.trim().isEmpty) && (m.deCall?.isNotEmpty ?? false);
-        final needsGrid = (s.myGrid == null || s.myGrid!.trim().isEmpty) && (m.deGrid?.isNotEmpty ?? false);
+        final needsCall = (s.myCall == null || s.myCall!.trim().isEmpty) &&
+            (m.deCall?.isNotEmpty ?? false);
+        final needsGrid = (s.myGrid == null || s.myGrid!.trim().isEmpty) &&
+            (m.deGrid?.isNotEmpty ?? false);
         if (needsCall || needsGrid) {
           ref.read(settingsProvider.notifier).update(s.copyWith(
                 myCall: needsCall ? m.deCall!.toUpperCase() : s.myCall,
@@ -410,7 +441,8 @@ final pskReporterClientProvider = Provider<PskReporterClient>((ref) {
   return c;
 });
 
-final callsignResolverProvider = ChangeNotifierProvider<CallsignResolver>((ref) {
+final callsignResolverProvider =
+    ChangeNotifierProvider<CallsignResolver>((ref) {
   final repo = ref.watch(qsoRepoProvider);
   final psk = ref.watch(pskReporterClientProvider);
   final resolver = CallsignResolver(
@@ -449,9 +481,15 @@ final solarDataProvider = StreamProvider<SolarData?>((ref) async* {
 /// when the user hasn't set a callsign yet.
 final pskSpotsProvider = StreamProvider<List<PskSpot>>((ref) async* {
   final s = ref.watch(settingsProvider);
-  if (s.pskSpotDirection == PskSpotDirection.off) { yield const []; return; }
+  if (s.pskSpotDirection == PskSpotDirection.off) {
+    yield const [];
+    return;
+  }
   final call = s.myCall?.trim();
-  if (call == null || call.isEmpty) { yield const []; return; }
+  if (call == null || call.isEmpty) {
+    yield const [];
+    return;
+  }
   final client = ref.watch(pskReporterClientProvider);
   final repo = ref.watch(qsoRepoProvider);
 
@@ -461,8 +499,11 @@ final pskSpotsProvider = StreamProvider<List<PskSpot>>((ref) async* {
 
   List<PskDirection> directionsFor(AppSettings s) {
     final r = <PskDirection>[];
-    if (s.pskSpotDirection == PskSpotDirection.sent     || s.pskSpotDirection == PskSpotDirection.both) r.add(PskDirection.sent);
-    if (s.pskSpotDirection == PskSpotDirection.received || s.pskSpotDirection == PskSpotDirection.both) r.add(PskDirection.received);
+    if (s.pskSpotDirection == PskSpotDirection.sent ||
+        s.pskSpotDirection == PskSpotDirection.both) r.add(PskDirection.sent);
+    if (s.pskSpotDirection == PskSpotDirection.received ||
+        s.pskSpotDirection == PskSpotDirection.both)
+      r.add(PskDirection.received);
     return r;
   }
 
@@ -472,47 +513,76 @@ final pskSpotsProvider = StreamProvider<List<PskSpot>>((ref) async* {
     final dirs = directionsFor(s);
     final all = <PskSpot>[];
     for (final d in dirs) {
-      final rows = await repo.readCachedPskSpots(myCall: call, since: since, direction: d.name);
+      final rows = await repo.readCachedPskSpots(
+          myCall: call, since: since, direction: d.name);
       for (final r in rows) {
         all.add(PskSpot(
-          otherCall: r.otherCall, otherGrid: r.otherGrid, direction: d,
-          at: r.at, freqHz: r.freqHz, snr: r.snr, mode: r.mode,
+          otherCall: r.otherCall,
+          otherGrid: r.otherGrid,
+          direction: d,
+          at: r.at,
+          freqHz: r.freqHz,
+          snr: r.snr,
+          mode: r.mode,
         ));
       }
     }
     return all;
   }
 
-  // Fresh fetch + persist. Failures degrade gracefully: whatever we got is
-  // merged with the cache so the map never goes empty just because one
-  // direction returned 503.
-  Future<List<PskSpot>> fetchAndCache() async {
+  // Fetch each direction independently and emit after every result. With
+  // "Both" selected, a slow/failed receiver query must not hide the already
+  // successful sender query.
+  Stream<List<PskSpot>> fetchCycle() async* {
     final since = windowFor(s);
     final dirs = directionsFor(s);
-    final fresh = <PskSpot>[];
+    final combined = <String, PskSpot>{};
+    void add(PskSpot p) {
+      combined[
+          '${p.otherCall}|${p.direction.name}|${p.at.millisecondsSinceEpoch}|${p.freqHz}'] = p;
+    }
+
+    for (final cached in await readCache()) {
+      add(cached);
+    }
+
     for (final dir in dirs) {
       try {
-        final r = await client.fetchSpots(myCall: call, direction: dir, since: since);
-        fresh.addAll(r);
-        await repo.cachePskSpots(call, dir.name,
-          r.map((s) => (otherCall: s.otherCall, otherGrid: s.otherGrid,
-                        at: s.at, freqHz: s.freqHz, snr: s.snr, mode: s.mode)));
+        final r =
+            await client.fetchSpots(myCall: call, direction: dir, since: since);
+        for (final spot in r) {
+          add(spot);
+        }
+        await repo.cachePskSpots(
+            call,
+            dir.name,
+            r.map((s) => (
+                  otherCall: s.otherCall,
+                  otherGrid: s.otherGrid,
+                  at: s.at,
+                  freqHz: s.freqHz,
+                  snr: s.snr,
+                  mode: s.mode
+                )));
       } catch (e) {
-        debugPrint('PSK Reporter fetch failed ($dir): $e — falling back to cache');
+        debugPrint(
+            'PSK Reporter fetch failed ($dir): $e — falling back to cache');
       }
+      final visible = combined.values.toList()
+        ..sort((a, b) => b.at.compareTo(a.at));
+      yield visible;
     }
-    final combined = <String, PskSpot>{};
-    void add(PskSpot p) => combined['${p.otherCall}|${p.direction.name}|${p.at.millisecondsSinceEpoch}|${p.freqHz}'] = p;
-    for (final p in fresh) { add(p); }
-    for (final p in await readCache()) { add(p); }
-    return combined.values.toList();
   }
 
   yield await readCache();
-  yield await fetchAndCache();
+  await for (final spots in fetchCycle()) {
+    yield spots;
+  }
   final t = Stream<void>.periodic(const Duration(minutes: 5));
   await for (final _ in t) {
-    yield await fetchAndCache();
+    await for (final spots in fetchCycle()) {
+      yield spots;
+    }
   }
 });
 
@@ -538,7 +608,8 @@ final adifTailProvider = Provider<AdifTailWatcher?>((ref) {
     final settings = ref.read(settingsProvider);
     final resolver = ref.read(callsignResolverProvider);
     for (final r in e.records) {
-      final enriched = _enrich(r, solar: solarSnapshot, ingestedAt: DateTime.now().toUtc());
+      final enriched =
+          _enrich(r, solar: solarSnapshot, ingestedAt: DateTime.now().toUtc());
       await repo.insertFromAdif(
         enriched,
         fallbackMyCall: settings.myCall,
@@ -559,7 +630,8 @@ final adifTailProvider = Provider<AdifTailWatcher?>((ref) {
 /// Returns a new [AdifRecord] with app-specific enrichment fields added
 /// (namespaced under APP_QSOBOOK_*). The original ADIF fields are preserved
 /// so subsequent re-exports round-trip cleanly.
-AdifRecord _enrich(AdifRecord src, {SolarData? solar, required DateTime ingestedAt}) {
+AdifRecord _enrich(AdifRecord src,
+    {SolarData? solar, required DateTime ingestedAt}) {
   final f = Map<String, String>.from(src.fields);
   f.addAll(_solarSnapshotFields(solar, ingestedAt));
   return AdifRecord(Map.unmodifiable(f));
@@ -568,16 +640,21 @@ AdifRecord _enrich(AdifRecord src, {SolarData? solar, required DateTime ingested
 /// Renders the current solar / propagation snapshot as a map of ADIF-style
 /// `app_qsobook_*` fields suitable for merging into either an [AdifRecord]
 /// or a UDP QSO's `raw_fields` JSON.
-Map<String, String> _solarSnapshotFields(SolarData? solar, DateTime ingestedAt) {
+Map<String, String> _solarSnapshotFields(
+    SolarData? solar, DateTime ingestedAt) {
   final f = <String, String>{
     'app_qsobook_ingested_at': ingestedAt.toIso8601String(),
   };
   if (solar == null) return f;
-  if (solar.sfi      != null) f['app_qsobook_sfi']      = solar.sfi!.toStringAsFixed(0);
-  if (solar.kIndex   != null) f['app_qsobook_k_index']  = solar.kIndex!.toStringAsFixed(1);
-  if (solar.aIndex   != null) f['app_qsobook_a_index']  = solar.aIndex!.toStringAsFixed(0);
-  if (solar.sunspots != null) f['app_qsobook_sunspots'] = solar.sunspots!.toString();
-  final cond = solar.twelveTenCondition(_isDaytimeUtc(ingestedAt) ? 'day' : 'night');
+  if (solar.sfi != null) f['app_qsobook_sfi'] = solar.sfi!.toStringAsFixed(0);
+  if (solar.kIndex != null)
+    f['app_qsobook_k_index'] = solar.kIndex!.toStringAsFixed(1);
+  if (solar.aIndex != null)
+    f['app_qsobook_a_index'] = solar.aIndex!.toStringAsFixed(0);
+  if (solar.sunspots != null)
+    f['app_qsobook_sunspots'] = solar.sunspots!.toString();
+  final cond =
+      solar.twelveTenCondition(_isDaytimeUtc(ingestedAt) ? 'day' : 'night');
   if (cond != null) f['app_qsobook_band_condition'] = cond;
   return f;
 }
@@ -601,8 +678,15 @@ typedef LogbookFilter = ({
   ReviewState? reviewState,
 });
 
-final logbookFilterProvider = StateProvider<LogbookFilter>((_) =>
-    (search: null, band: null, mode: null, antennaId: null, radioId: null, minRating: null, reviewState: null));
+final logbookFilterProvider = StateProvider<LogbookFilter>((_) => (
+      search: null,
+      band: null,
+      mode: null,
+      antennaId: null,
+      radioId: null,
+      minRating: null,
+      reviewState: null
+    ));
 
 final logbookProvider = StreamProvider<List<Qso>>((ref) {
   final repo = ref.watch(qsoRepoProvider);
@@ -620,13 +704,17 @@ final logbookProvider = StreamProvider<List<Qso>>((ref) {
 
 // ---------------- Equipment library ----------------
 
-final antennasProvider = StreamProvider<List<Antenna>>((ref) => ref.watch(qsoRepoProvider).watchAntennas());
-final rigsProvider     = StreamProvider<List<Rig>>((ref) => ref.watch(qsoRepoProvider).watchRigs());
+final antennasProvider = StreamProvider<List<Antenna>>(
+    (ref) => ref.watch(qsoRepoProvider).watchAntennas());
+final rigsProvider =
+    StreamProvider<List<Rig>>((ref) => ref.watch(qsoRepoProvider).watchRigs());
 
 // ---------------- Review queue ----------------
 
-final needsReviewProvider = StreamProvider<List<Qso>>((ref) => ref.watch(qsoRepoProvider).watchNeedsReview());
-final needsReviewCountProvider = StreamProvider<int>((ref) => ref.watch(qsoRepoProvider).watchNeedsReviewCount());
+final needsReviewProvider = StreamProvider<List<Qso>>(
+    (ref) => ref.watch(qsoRepoProvider).watchNeedsReview());
+final needsReviewCountProvider = StreamProvider<int>(
+    (ref) => ref.watch(qsoRepoProvider).watchNeedsReviewCount());
 
 /// Cached set of every callsign already in our logbook. Drives the NEW-CQ
 /// badge on live map decodes — recomputes whenever the logbook stream
@@ -640,7 +728,9 @@ final equipmentStatsProvider = FutureProvider<List<EquipmentStat>>((ref) async {
   ref.watch(logbookProvider);
   final s = ref.watch(settingsProvider);
   final me = s.myGrid == null ? null : _gridToLatLngPublic(s.myGrid!);
-  return ref.watch(qsoRepoProvider).equipmentStats(myLat: me?.$1, myLon: me?.$2);
+  return ref
+      .watch(qsoRepoProvider)
+      .equipmentStats(myLat: me?.$1, myLon: me?.$2);
 });
 
 final statsExtrasProvider = FutureProvider<StatsExtras>((ref) async {
@@ -648,7 +738,8 @@ final statsExtrasProvider = FutureProvider<StatsExtras>((ref) async {
   final s = ref.watch(settingsProvider);
   final me = s.myGrid == null ? null : _gridToLatLngPublic(s.myGrid!);
   return ref.watch(qsoRepoProvider).extras(
-        myLat: me?.$1, myLon: me?.$2,
+        myLat: me?.$1,
+        myLon: me?.$2,
       );
 });
 
@@ -657,7 +748,14 @@ final statsExtrasProvider = FutureProvider<StatsExtras>((ref) async {
   if (gg.length < 4) return null;
   final f1 = gg.codeUnitAt(0) - 0x41, f2 = gg.codeUnitAt(1) - 0x41;
   final s1 = gg.codeUnitAt(2) - 0x30, s2 = gg.codeUnitAt(3) - 0x30;
-  if (f1 < 0 || f1 > 17 || f2 < 0 || f2 > 17 || s1 < 0 || s1 > 9 || s2 < 0 || s2 > 9) return null;
+  if (f1 < 0 ||
+      f1 > 17 ||
+      f2 < 0 ||
+      f2 > 17 ||
+      s1 < 0 ||
+      s1 > 9 ||
+      s2 < 0 ||
+      s2 > 9) return null;
   return (-90 + f2 * 10 + s2 + 0.5, -180 + f1 * 20 + s1 * 2 + 1);
 }
 
@@ -672,7 +770,8 @@ class Kpis {
   final int uniqueCalls;
   final int uniqueGrids;
   final int uniqueCountries;
-  const Kpis(this.total, this.uniqueCalls, this.uniqueGrids, this.uniqueCountries);
+  const Kpis(
+      this.total, this.uniqueCalls, this.uniqueGrids, this.uniqueCountries);
 }
 
 final kpisProvider = FutureProvider<Kpis>((ref) async {
@@ -733,4 +832,3 @@ final adifImportProvider = Provider<Future<int> Function(String)>((ref) {
     return n;
   };
 });
-
