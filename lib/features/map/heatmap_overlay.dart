@@ -69,31 +69,41 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       return;
     }
 
-    final hull = _convexHull(samples.map((sample) => sample.point).toList());
-    if (hull.length < 3) return;
-
-    var minLat = hull.first.latitude;
-    var maxLat = minLat;
-    var minLon = hull.first.longitude;
-    var maxLon = minLon;
-    for (final point in hull.skip(1)) {
-      minLat = math.min(minLat, point.latitude);
-      maxLat = math.max(maxLat, point.latitude);
-      minLon = math.min(minLon, point.longitude);
-      maxLon = math.max(maxLon, point.longitude);
+    // Work in Web Mercator coordinates—the same projection flutter_map uses.
+    // A latitude-linear raster drifts away from map markers at higher
+    // latitudes even when both use the same geographic bounds.
+    final mercatorSamples = samples
+        .map(
+          (sample) => _MercatorSample(
+            Offset(_mercatorX(sample.point.longitude),
+                _mercatorY(sample.point.latitude)),
+            sample.report,
+          ),
+        )
+        .toList();
+    var minX = mercatorSamples.first.point.dx;
+    var maxX = minX;
+    var minY = mercatorSamples.first.point.dy;
+    var maxY = minY;
+    for (final sample in mercatorSamples.skip(1)) {
+      minX = math.min(minX, sample.point.dx);
+      maxX = math.max(maxX, sample.point.dx);
+      minY = math.min(minY, sample.point.dy);
+      maxY = math.max(maxY, sample.point.dy);
     }
 
-    // A small visual margin prevents the polygon stroke touching tile edges.
-    final latPad = math.max((maxLat - minLat) * 0.04, 0.05);
-    final lonPad = math.max((maxLon - minLon) * 0.04, 0.05);
-    minLat -= latPad;
-    maxLat += latPad;
-    minLon -= lonPad;
-    maxLon += lonPad;
+    // Leave enough room to expand and round the hull while keeping all
+    // measured points safely inside the final propagation envelope.
+    final rawXSpan = math.max(maxX - minX, 0.0005);
+    final rawYSpan = math.max(maxY - minY, 0.0005);
+    minX -= rawXSpan * 0.20;
+    maxX += rawXSpan * 0.20;
+    minY -= rawYSpan * 0.20;
+    maxY += rawYSpan * 0.20;
 
-    final latSpan = math.max(maxLat - minLat, 0.001);
-    final lonSpan = math.max(maxLon - minLon, 0.001);
-    final aspect = lonSpan / latSpan;
+    final xSpan = math.max(maxX - minX, 0.0001);
+    final ySpan = math.max(maxY - minY, 0.0001);
+    final aspect = xSpan / ySpan;
     const longestSide = 640;
     final width = math.max(
       160,
@@ -104,15 +114,30 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       aspect >= 1 ? (longestSide / aspect).round() : longestSide,
     );
 
-    Offset project(LatLng point) => Offset(
-      (point.longitude - minLon) / lonSpan * (width - 1),
-      (maxLat - point.latitude) / latSpan * (height - 1),
-    );
+    Offset project(Offset point) => Offset(
+          (point.dx - minX) / xSpan * (width - 1),
+          (point.dy - minY) / ySpan * (height - 1),
+        );
 
-    final projectedHull = hull.map(project).toList();
-    final projectedSamples = samples
+    final projectedSamples = mercatorSamples
         .map((sample) => _ProjectedSample(project(sample.point), sample.report))
         .toList();
+    final rawHull =
+        _convexHull(projectedSamples.map((sample) => sample.point).toList());
+    if (rawHull.length < 3) return;
+
+    // Expand before smoothing because Chaikin/Bézier-style corner cutting
+    // otherwise pulls the path inside the outermost station markers.
+    // Increase the buffer until every sample is inside the smooth envelope.
+    List<Offset> projectedHull = rawHull;
+    for (final buffer in <double>[18, 28, 40, 56]) {
+      final candidate = _smoothClosed(_expandHull(rawHull, buffer), passes: 3);
+      projectedHull = candidate;
+      if (projectedSamples
+          .every((sample) => _insideOrNear(sample.point, candidate))) {
+        break;
+      }
+    }
     final pixels = Uint8List(width * height * 4);
 
     for (var y = 0; y < height; y++) {
@@ -143,10 +168,11 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
           0.35,
           1.0,
         );
+        final argb = color.toARGB32();
         final offset = (y * width + x) * 4;
-        pixels[offset] = color.red;
-        pixels[offset + 1] = color.green;
-        pixels[offset + 2] = color.blue;
+        pixels[offset] = (argb >> 16) & 0xff;
+        pixels[offset + 1] = (argb >> 8) & 0xff;
+        pixels[offset + 2] = argb & 0xff;
         pixels[offset + 3] = (190 * proximity).round();
       }
     }
@@ -167,7 +193,10 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
     setState(() {
       _image?.dispose();
       _image = image;
-      _bounds = LatLngBounds(LatLng(minLat, minLon), LatLng(maxLat, maxLon));
+      _bounds = LatLngBounds(
+        LatLng(_inverseMercatorY(maxY), _inverseMercatorX(minX)),
+        LatLng(_inverseMercatorY(minY), _inverseMercatorX(maxX)),
+      );
     });
   }
 
@@ -208,6 +237,29 @@ class _ProjectedSample {
   const _ProjectedSample(this.point, this.report);
 }
 
+class _MercatorSample {
+  final Offset point;
+  final double report;
+
+  const _MercatorSample(this.point, this.report);
+}
+
+double _mercatorX(double longitude) => (longitude + 180) / 360;
+
+double _mercatorY(double latitude) {
+  final radians = latitude.clamp(-85.05112878, 85.05112878) * math.pi / 180;
+  return (1 - math.log(math.tan(radians) + 1 / math.cos(radians)) / math.pi) /
+      2;
+}
+
+double _inverseMercatorX(double x) => x * 360 - 180;
+
+double _inverseMercatorY(double y) {
+  final value = math.pi * (1 - 2 * y);
+  final sinh = (math.exp(value) - math.exp(-value)) / 2;
+  return math.atan(sinh) * 180 / math.pi;
+}
+
 double _reportValue(String? raw) {
   if (raw == null) return -20;
   return (double.tryParse(raw.replaceAll(RegExp(r'[^0-9+.-]'), '')) ?? -20)
@@ -237,19 +289,19 @@ Color _reportColor(double report) {
   )!;
 }
 
-List<LatLng> _convexHull(List<LatLng> points) {
+List<Offset> _convexHull(List<Offset> points) {
   if (points.length <= 2) return List.of(points);
-  final sorted = List<LatLng>.of(points)
+  final sorted = List<Offset>.of(points)
     ..sort((a, b) {
-      final longitude = a.longitude.compareTo(b.longitude);
-      return longitude != 0 ? longitude : a.latitude.compareTo(b.latitude);
+      final x = a.dx.compareTo(b.dx);
+      return x != 0 ? x : a.dy.compareTo(b.dy);
     });
 
-  double cross(LatLng origin, LatLng a, LatLng b) =>
-      (a.longitude - origin.longitude) * (b.latitude - origin.latitude) -
-      (a.latitude - origin.latitude) * (b.longitude - origin.longitude);
+  double cross(Offset origin, Offset a, Offset b) =>
+      (a.dx - origin.dx) * (b.dy - origin.dy) -
+      (a.dy - origin.dy) * (b.dx - origin.dx);
 
-  final lower = <LatLng>[];
+  final lower = <Offset>[];
   for (final point in sorted) {
     while (lower.length >= 2 &&
         cross(lower[lower.length - 2], lower.last, point) <= 0) {
@@ -257,7 +309,7 @@ List<LatLng> _convexHull(List<LatLng> points) {
     }
     lower.add(point);
   }
-  final upper = <LatLng>[];
+  final upper = <Offset>[];
   for (final point in sorted.reversed) {
     while (upper.length >= 2 &&
         cross(upper[upper.length - 2], upper.last, point) <= 0) {
@@ -270,13 +322,70 @@ List<LatLng> _convexHull(List<LatLng> points) {
   return [...lower, ...upper];
 }
 
+List<Offset> _expandHull(List<Offset> hull, double pixels) {
+  final centroid = hull.fold<Offset>(
+        Offset.zero,
+        (sum, point) => sum + point,
+      ) /
+      hull.length.toDouble();
+  return hull.map((point) {
+    final direction = point - centroid;
+    final length = direction.distance;
+    if (length < 1e-6) return point;
+    return point + direction / length * pixels;
+  }).toList();
+}
+
+/// Chaikin corner cutting is equivalent to chaining quadratic Bézier segments
+/// and gives a stable, organic closed outline without overshooting the hull.
+List<Offset> _smoothClosed(List<Offset> polygon, {int passes = 2}) {
+  var result = List<Offset>.of(polygon);
+  for (var pass = 0; pass < passes; pass++) {
+    final next = <Offset>[];
+    for (var i = 0; i < result.length; i++) {
+      final a = result[i];
+      final b = result[(i + 1) % result.length];
+      next
+        ..add(a * 0.75 + b * 0.25)
+        ..add(a * 0.25 + b * 0.75);
+    }
+    result = next;
+  }
+  return result;
+}
+
+bool _insideOrNear(Offset point, List<Offset> polygon) {
+  if (_insidePolygon(point, polygon)) return true;
+  for (var i = 0; i < polygon.length; i++) {
+    if (_distanceToSegment(
+          point,
+          polygon[i],
+          polygon[(i + 1) % polygon.length],
+        ) <=
+        3) {
+      return true;
+    }
+  }
+  return false;
+}
+
+double _distanceToSegment(Offset point, Offset a, Offset b) {
+  final segment = b - a;
+  final lengthSquared = segment.dx * segment.dx + segment.dy * segment.dy;
+  if (lengthSquared == 0) return (point - a).distance;
+  final relative = point - a;
+  final t =
+      ((relative.dx * segment.dx + relative.dy * segment.dy) / lengthSquared)
+          .clamp(0.0, 1.0);
+  return (point - (a + segment * t)).distance;
+}
+
 bool _insidePolygon(Offset point, List<Offset> polygon) {
   var inside = false;
   for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     final current = polygon[i];
     final previous = polygon[j];
-    final intersects =
-        (current.dy > point.dy) != (previous.dy > point.dy) &&
+    final intersects = (current.dy > point.dy) != (previous.dy > point.dy) &&
         point.dx <
             (previous.dx - current.dx) *
                     (point.dy - current.dy) /
@@ -300,9 +409,10 @@ class _UiImageProvider extends ImageProvider<_UiImageProvider> {
   ImageStreamCompleter loadImage(
     _UiImageProvider key,
     ImageDecoderCallback decode,
-  ) => OneFrameImageStreamCompleter(
-    Future.value(ImageInfo(image: image, scale: 1)),
-  );
+  ) =>
+      OneFrameImageStreamCompleter(
+        Future.value(ImageInfo(image: image, scale: 1)),
+      );
 
   @override
   bool operator ==(Object other) =>
