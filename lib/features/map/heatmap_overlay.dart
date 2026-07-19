@@ -145,7 +145,7 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
     // Each station uses a long Gaussian tail. At 3.5 sigma it is already
     // visually transparent, so stopping there cannot reveal a circular edge.
     const innerLongestSide = 640.0;
-    const cloudSigma = 60.0;
+    const cloudSigma = 40.0;
     const cloudExtent = cloudSigma * 3.5;
     const rasterPadding = cloudExtent + 12;
     final rawXSpan = math.max(maxX - minX, 0.0005);
@@ -209,11 +209,15 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       if (weight <= 0) continue;
       final report = weightedReports[index] / weight;
       final color = _reportColor(report).toARGB32();
+      final opacity = maximumOpacity[index].clamp(0.0, 1.0);
       final offset = index * 4;
-      pixels[offset] = (color >> 16) & 0xff;
-      pixels[offset + 1] = (color >> 8) & 0xff;
-      pixels[offset + 2] = color & 0xff;
-      pixels[offset + 3] = (255 * maximumOpacity[index]).round().clamp(0, 255);
+      // PixelFormat.rgba8888 requires premultiplied alpha. Writing straight
+      // RGB here leaves vivid colour in nearly transparent pixels and makes
+      // the Gaussian tail look like a large solid circle.
+      pixels[offset] = (((color >> 16) & 0xff) * opacity).round();
+      pixels[offset + 1] = (((color >> 8) & 0xff) * opacity).round();
+      pixels[offset + 2] = ((color & 0xff) * opacity).round();
+      pixels[offset + 3] = (255 * opacity).round();
     }
 
     final completer = Completer<ui.Image>();
