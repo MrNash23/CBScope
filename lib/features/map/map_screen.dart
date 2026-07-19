@@ -61,6 +61,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   int? _pinnedAntennaId;
   int? _hoverRadioId;
   int? _hoverAntennaId;
+  HeatmapSignalDirection _heatmapDirection = HeatmapSignalDirection.send;
   QsoAgeFilter _ageFilter = QsoAgeFilter.all;
   int _ageCustomMinutes = 15; // used when _ageFilter == custom (1-60 min)
   double _minSnr = -30; // dB
@@ -270,7 +271,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 markers: _flowingPskDots(myLatLng, pskSpots, pskColor),
               ),
             if (previewRadioId != null || previewAntennaId != null)
-              HeatmapOverlay(qsos: heatmapQsos),
+              HeatmapOverlay(
+                qsos: heatmapQsos,
+                direction: _heatmapDirection,
+              ),
             MarkerLayer(
               markers: [...qsoMarkers, ...pskMarkers, ...decodeMarkers],
             ),
@@ -468,6 +472,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               pinnedAntennaId: _pinnedAntennaId,
               hoverRadioId: _hoverRadioId,
               hoverAntennaId: _hoverAntennaId,
+              heatmapDirection: _heatmapDirection,
+              onHeatmapDirectionChanged: (direction) =>
+                  setState(() => _heatmapDirection = direction),
               onEquipmentChanged: (equipment) => setState(() {
                 _pinnedRadioId = equipment.pinnedRadioId;
                 _pinnedAntennaId = equipment.pinnedAntennaId;
@@ -829,6 +836,8 @@ class _FilterPanel extends ConsumerWidget {
   final int? pinnedAntennaId;
   final int? hoverRadioId;
   final int? hoverAntennaId;
+  final HeatmapSignalDirection heatmapDirection;
+  final ValueChanged<HeatmapSignalDirection> onHeatmapDirectionChanged;
   final ValueChanged<_EquipmentPreviewState> onEquipmentChanged;
   final ValueChanged<_FilterState> onChanged;
   final VoidCallback onClose;
@@ -847,6 +856,8 @@ class _FilterPanel extends ConsumerWidget {
     required this.pinnedAntennaId,
     required this.hoverRadioId,
     required this.hoverAntennaId,
+    required this.heatmapDirection,
+    required this.onHeatmapDirectionChanged,
     required this.onEquipmentChanged,
     required this.onChanged,
     required this.onClose,
@@ -1072,6 +1083,8 @@ class _FilterPanel extends ConsumerWidget {
                     pinnedAntennaId: pinnedAntennaId,
                     hoverRadioId: hoverRadioId,
                     hoverAntennaId: hoverAntennaId,
+                    direction: heatmapDirection,
+                    onDirectionChanged: onHeatmapDirectionChanged,
                     onChanged: onEquipmentChanged,
                   ),
                   const SizedBox(height: 16),
@@ -1686,6 +1699,8 @@ class _EquipmentHeatmapControls extends ConsumerWidget {
   final int? pinnedAntennaId;
   final int? hoverRadioId;
   final int? hoverAntennaId;
+  final HeatmapSignalDirection direction;
+  final ValueChanged<HeatmapSignalDirection> onDirectionChanged;
   final ValueChanged<_EquipmentPreviewState> onChanged;
 
   const _EquipmentHeatmapControls({
@@ -1693,6 +1708,8 @@ class _EquipmentHeatmapControls extends ConsumerWidget {
     required this.pinnedAntennaId,
     required this.hoverRadioId,
     required this.hoverAntennaId,
+    required this.direction,
+    required this.onDirectionChanged,
     required this.onChanged,
   });
 
@@ -1782,6 +1799,28 @@ class _EquipmentHeatmapControls extends ConsumerWidget {
         Text(
           'Hover to preview. Click to pin; then hover the other group to compare.',
           style: t.bodySmall?.copyWith(color: c.subtle),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final value in HeatmapSignalDirection.values)
+              ChoiceChip(
+                label: Text(value.label),
+                selected: direction == value,
+                onSelected: (_) => onDirectionChanged(value),
+                selectedColor: c.accent.withValues(alpha: 0.2),
+                side: BorderSide(
+                  color: direction == value ? c.accent : c.border,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 5),
+        Text(
+          direction.explanation,
+          style: t.labelSmall?.copyWith(color: c.subtle),
         ),
         if (rigs.isNotEmpty) ...[
           const SizedBox(height: 10),
