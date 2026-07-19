@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -34,8 +36,9 @@ extension HeatmapSignalDirectionX on HeatmapSignalDirection {
 /// A signal-propagation cloud made from independent radial station fields.
 ///
 /// Every locator contributes a soft colour cloud based on its FT8 dB report.
-/// Clouds merge additively where they overlap and independently decay to full
-/// transparency elsewhere. There is deliberately no enclosing polygon.
+/// Overlaps use a distance-weighted report average and never add intensity:
+/// overlap therefore cannot imply a stronger signal than was measured.
+/// Clouds independently decay to transparency; there is no enclosing polygon.
 class HeatmapOverlay extends StatefulWidget {
   final List<Qso> qsos;
   final HeatmapSignalDirection direction;
@@ -167,37 +170,59 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
           (point.dy - minY) / ySpan * (height - 1),
         );
 
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.clear);
+    final pixelCount = width * height;
+    final weightedReports = Float32List(pixelCount);
+    final totalWeights = Float32List(pixelCount);
+    final maximumOpacity = Float32List(pixelCount);
+    const radiusSquared = cloudRadius * cloudRadius;
 
-    // Weak clouds first, stronger clouds last. BlendMode.plus makes overlap
-    // luminous and order-independent in spirit, while retaining each report's
-    // own red→amber→green→cyan signal colour.
-    final ordered = List<_MercatorSample>.of(mercatorSamples)
-      ..sort((a, b) => a.report.compareTo(b.report));
-    for (final sample in ordered) {
+    // Accumulate only inside each cloud's bounding box. Report values are
+    // averaged by radial influence; opacity uses max(), never addition.
+    for (final sample in mercatorSamples) {
       final center = project(sample.point);
-      final color = _reportColor(sample.report);
-      final paint = Paint()
-        ..blendMode = BlendMode.plus
-        ..shader = ui.Gradient.radial(
-          center,
-          cloudRadius,
-          [
-            color.withValues(alpha: 0.72),
-            color.withValues(alpha: 0.58),
-            color.withValues(alpha: 0.24),
-            color.withValues(alpha: 0),
-          ],
-          const [0, 0.24, 0.66, 1],
-        );
-      canvas.drawCircle(center, cloudRadius, paint);
+      final left = math.max(0, (center.dx - cloudRadius).floor());
+      final right = math.min(width - 1, (center.dx + cloudRadius).ceil());
+      final top = math.max(0, (center.dy - cloudRadius).floor());
+      final bottom = math.min(height - 1, (center.dy + cloudRadius).ceil());
+      for (var y = top; y <= bottom; y++) {
+        final dy = y + 0.5 - center.dy;
+        for (var x = left; x <= right; x++) {
+          final dx = x + 0.5 - center.dx;
+          final distanceSquared = dx * dx + dy * dy;
+          if (distanceSquared >= radiusSquared) continue;
+          final normalizedDistance = math.sqrt(distanceSquared) / cloudRadius;
+          final influence = _cloudInfluence(normalizedDistance);
+          if (influence <= 0) continue;
+          final index = y * width + x;
+          weightedReports[index] += sample.report * influence;
+          totalWeights[index] += influence;
+          maximumOpacity[index] = math.max(maximumOpacity[index], influence);
+        }
+      }
     }
 
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(width, height);
-    picture.dispose();
+    final pixels = Uint8List(pixelCount * 4);
+    for (var index = 0; index < pixelCount; index++) {
+      final weight = totalWeights[index];
+      if (weight <= 0) continue;
+      final report = weightedReports[index] / weight;
+      final color = _reportColor(report).toARGB32();
+      final offset = index * 4;
+      pixels[offset] = (color >> 16) & 0xff;
+      pixels[offset + 1] = (color >> 8) & 0xff;
+      pixels[offset + 2] = color & 0xff;
+      pixels[offset + 3] = (255 * maximumOpacity[index]).round().clamp(0, 255);
+    }
+
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      pixels,
+      width,
+      height,
+      ui.PixelFormat.rgba8888,
+      completer.complete,
+    );
+    final image = await completer.future;
     if (!mounted || _inputHash != _hashInputs()) {
       image.dispose();
       return;
@@ -286,6 +311,19 @@ double? _parseReport(String? raw) {
   return double.tryParse(raw.replaceAll(RegExp(r'[^0-9+.-]'), ''))
       ?.clamp(-30, 10)
       .toDouble();
+}
+
+double _cloudInfluence(double normalizedDistance) {
+  if (normalizedDistance >= 1) return 0;
+  // Dense but soft centre, then a long tail that reaches exactly zero.
+  final gaussian = math.exp(-3 * normalizedDistance * normalizedDistance);
+  final cutoff = 1 - _smoothStep(0.68, 1, normalizedDistance);
+  return 0.72 * gaussian * cutoff;
+}
+
+double _smoothStep(double edge0, double edge1, double value) {
+  final t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+  return t * t * (3 - 2 * t);
 }
 
 Color _reportColor(double report) {
