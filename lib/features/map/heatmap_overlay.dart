@@ -59,7 +59,7 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       samples.add(_Sample(point, _reportValue(qso.rstRcvd)));
     }
 
-    if (samples.length < 3) {
+    if (samples.isEmpty) {
       if (mounted) {
         setState(() {
           _image = null;
@@ -122,15 +122,14 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
     final projectedSamples = mercatorSamples
         .map((sample) => _ProjectedSample(project(sample.point), sample.report))
         .toList();
-    final rawHull =
-        _convexHull(projectedSamples.map((sample) => sample.point).toList());
-    if (rawHull.length < 3) return;
+    final rawHull = _coverageSeedHull(
+        projectedSamples.map((sample) => sample.point).toList());
 
     // Expand before smoothing because Chaikin/Bézier-style corner cutting
     // otherwise pulls the path inside the outermost station markers.
     // Increase the buffer until every sample is inside the smooth envelope.
     List<Offset> projectedHull = rawHull;
-    for (final buffer in <double>[18, 28, 40, 56]) {
+    for (final buffer in <double>[36, 52, 72, 92]) {
       final candidate = _smoothClosed(_expandHull(rawHull, buffer), passes: 3);
       projectedHull = candidate;
       if (projectedSamples
@@ -139,6 +138,7 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
       }
     }
     final pixels = Uint8List(width * height * 4);
+    const edgeFeatherPx = 18.0;
 
     for (var y = 0; y < height; y++) {
       for (var x = 0; x < width; x++) {
@@ -168,12 +168,18 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
           0.35,
           1.0,
         );
+        final edgeDistance = _distanceToPolygonEdge(pixel, projectedHull);
+        final edgeFade = _smoothStep(
+          0,
+          edgeFeatherPx,
+          edgeDistance,
+        );
         final argb = color.toARGB32();
         final offset = (y * width + x) * 4;
         pixels[offset] = (argb >> 16) & 0xff;
         pixels[offset + 1] = (argb >> 8) & 0xff;
         pixels[offset + 2] = argb & 0xff;
-        pixels[offset + 3] = (190 * proximity).round();
+        pixels[offset + 3] = (190 * proximity * edgeFade).round();
       }
     }
 
@@ -322,6 +328,24 @@ List<Offset> _convexHull(List<Offset> points) {
   return [...lower, ...upper];
 }
 
+/// Supplies a real area even when an equipment combination has only one or
+/// two QSOs. Multiple tiny circles are hulled into either a round island or a
+/// capsule, while 3+ locations use their actual outer hull.
+List<Offset> _coverageSeedHull(List<Offset> points) {
+  if (points.length >= 3) return _convexHull(points);
+  const radius = 20.0;
+  final support = <Offset>[];
+  for (final point in points) {
+    for (var step = 0; step < 16; step++) {
+      final angle = step / 16 * math.pi * 2;
+      support.add(
+        point + Offset(math.cos(angle), math.sin(angle)) * radius,
+      );
+    }
+  }
+  return _convexHull(support);
+}
+
 List<Offset> _expandHull(List<Offset> hull, double pixels) {
   final centroid = hull.fold<Offset>(
         Offset.zero,
@@ -378,6 +402,26 @@ double _distanceToSegment(Offset point, Offset a, Offset b) {
       ((relative.dx * segment.dx + relative.dy * segment.dy) / lengthSquared)
           .clamp(0.0, 1.0);
   return (point - (a + segment * t)).distance;
+}
+
+double _distanceToPolygonEdge(Offset point, List<Offset> polygon) {
+  var nearest = double.infinity;
+  for (var i = 0; i < polygon.length; i++) {
+    nearest = math.min(
+      nearest,
+      _distanceToSegment(
+        point,
+        polygon[i],
+        polygon[(i + 1) % polygon.length],
+      ),
+    );
+  }
+  return nearest;
+}
+
+double _smoothStep(double edge0, double edge1, double value) {
+  final t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+  return t * t * (3 - 2 * t);
 }
 
 bool _insidePolygon(Offset point, List<Offset> polygon) {
