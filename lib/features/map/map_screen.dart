@@ -162,13 +162,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final decodeLines = <Polyline>[];
     if (_showDecodes) {
       for (final d in decodes) {
-        final call = d.decode.cqCall();
+        final call = d.decode.stationCall();
         if (call == null) continue;
         if (d.decode.snr < _minSnr) continue;
         // Replay hides decodes newer than the scrubber.
         if (_replayEnabled && d.receivedAt.toUtc().isAfter(effectiveNow))
           continue;
-        final hintedGrid = d.decode.cqGrid();
+        final hintedGrid = d.decode.gridHint();
         final resolvedGrid = resolver.gridFor(call, seenGridHint: hintedGrid);
         if (resolvedGrid == null) continue;
         final ll = gridToLatLng(resolvedGrid);

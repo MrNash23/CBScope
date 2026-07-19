@@ -420,8 +420,8 @@ final qsoLoggedIngestProvider = Provider<void>((ref) {
           gridResolver: (call) => r.gridFor(call),
         );
       } else if (m is WsjtxDecode) {
-        final call = m.cqCall();
-        final grid = m.cqGrid();
+        final call = m.stationCall();
+        final grid = m.gridHint();
         if (call != null) {
           resolver.gridFor(call, seenGridHint: grid);
         }

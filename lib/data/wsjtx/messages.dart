@@ -10,7 +10,11 @@ class WsjtxHeartbeat extends WsjtxMessage {
   final int maxSchema;
   final String version;
   final String revision;
-  const WsjtxHeartbeat({required super.id, required this.maxSchema, required this.version, required this.revision});
+  const WsjtxHeartbeat(
+      {required super.id,
+      required this.maxSchema,
+      required this.version,
+      required this.revision});
 }
 
 class WsjtxStatus extends WsjtxMessage {
@@ -81,26 +85,76 @@ class WsjtxDecode extends WsjtxMessage {
   String? cqCall() {
     final parts = message.trim().split(RegExp(r'\s+'));
     if (parts.isEmpty || parts.first != 'CQ') return null;
-    if (parts.length >= 3) {
-      // "CQ DX call grid" or "CQ POTA call grid"
-      final second = parts[1];
-      if (second.length <= 4 && !RegExp(r'[0-9]').hasMatch(second)) {
-        return parts.length >= 3 ? parts[2] : null;
+    return stationCall();
+  }
+
+  /// Callsign of the station that transmitted this decode.
+  ///
+  /// Standard directed FT8 messages are `TO_CALL FROM_CALL payload`, so the
+  /// transmitting station is the second token. For CQ messages we accept
+  /// arbitrary 11m CB callsigns and derive the call relative to the optional
+  /// grid instead of applying amateur-radio callsign validation.
+  String? stationCall() {
+    final parts = message.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return null;
+
+    if (parts.first.toUpperCase() == 'CQ') {
+      if (parts.length < 2) return null;
+      final gridIndex = parts.lastIndexWhere(_isGridToken);
+      if (gridIndex >= 2) return _cleanCallToken(parts[gridIndex - 1]);
+
+      const cqModifiers = {
+        'DX',
+        'TEST',
+        'POTA',
+        'SOTA',
+        'WW',
+        'EU',
+        'NA',
+        'SA',
+        'AS',
+        'AF',
+        'OC',
+      };
+      final second = parts[1].toUpperCase();
+      if (parts.length >= 3 && cqModifiers.contains(second)) {
+        return _cleanCallToken(parts[2]);
       }
-      return parts[1];
+      return _cleanCallToken(parts[1]);
     }
-    return parts.length >= 2 ? parts[1] : null;
+
+    if (parts.length < 2) return null;
+    return _cleanCallToken(parts[1]);
   }
 
   /// Parse the reported grid (last token of decode text if 4-char) if present.
   String? cqGrid() {
+    return gridHint();
+  }
+
+  /// Locator carried by any CQ or directed FT8 message.
+  String? gridHint() {
     final parts = message.trim().split(RegExp(r'\s+'));
     if (parts.length < 2) return null;
-    final last = parts.last;
-    if (RegExp(r'^[A-R]{2}[0-9]{2}([a-x]{2})?$', caseSensitive: false).hasMatch(last)) {
-      return last.toUpperCase();
+    for (final token in parts.reversed) {
+      if (_isGridToken(token)) return token.toUpperCase();
     }
     return null;
+  }
+
+  static bool _isGridToken(String token) => RegExp(
+        r'^[A-R]{2}[0-9]{2}([A-X]{2})?$',
+        caseSensitive: false,
+      ).hasMatch(token);
+
+  static String? _cleanCallToken(String token) {
+    final call = token.replaceAll(RegExp(r'^[<]|[>]$'), '').toUpperCase();
+    if (call.isEmpty ||
+        _isGridToken(call) ||
+        RegExp(r'^(R?[+-]?[0-9]{1,2}|R|RRR|RR73|73)$').hasMatch(call)) {
+      return null;
+    }
+    return call;
   }
 }
 
