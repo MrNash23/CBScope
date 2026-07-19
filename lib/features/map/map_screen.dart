@@ -13,30 +13,32 @@ import '../../core/util/maidenhead.dart';
 import '../../core/widgets/app_card.dart';
 import '../../core/widgets/propagation_card.dart';
 import '../../data/db/database.dart';
-import '../../data/db/qso_repository.dart' show ReviewState;
 import '../../data/psk_reporter/psk_reporter_client.dart';
 import '../../providers/providers.dart';
 import '../station/station_profile_sheet.dart';
+import 'heatmap_overlay.dart';
 
 enum QsoAgeFilter { custom, last24h, week, month, year, all }
 
 extension QsoAgeFilterX on QsoAgeFilter {
   String get label => switch (this) {
-        QsoAgeFilter.custom  => 'Custom',
-        QsoAgeFilter.last24h => 'Last 24 h',
-        QsoAgeFilter.week    => 'Last week',
-        QsoAgeFilter.month   => 'Last month',
-        QsoAgeFilter.year    => 'Last year',
-        QsoAgeFilter.all     => 'All time',
-      };
+    QsoAgeFilter.custom => 'Custom',
+    QsoAgeFilter.last24h => 'Last 24 h',
+    QsoAgeFilter.week => 'Last week',
+    QsoAgeFilter.month => 'Last month',
+    QsoAgeFilter.year => 'Last year',
+    QsoAgeFilter.all => 'All time',
+  };
   Duration? get maxAge => switch (this) {
-        QsoAgeFilter.custom  => const Duration(hours: 24), // fallback, real value comes from slider
-        QsoAgeFilter.last24h => const Duration(hours: 24),
-        QsoAgeFilter.week    => const Duration(days: 7),
-        QsoAgeFilter.month   => const Duration(days: 30),
-        QsoAgeFilter.year    => const Duration(days: 365),
-        QsoAgeFilter.all     => null,
-      };
+    QsoAgeFilter.custom => const Duration(
+      hours: 24,
+    ), // fallback, real value comes from slider
+    QsoAgeFilter.last24h => const Duration(hours: 24),
+    QsoAgeFilter.week => const Duration(days: 7),
+    QsoAgeFilter.month => const Duration(days: 30),
+    QsoAgeFilter.year => const Duration(days: 365),
+    QsoAgeFilter.all => null,
+  };
 }
 
 class MapScreen extends ConsumerStatefulWidget {
@@ -55,6 +57,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   bool _showPskSpots = true;
   bool _showGreyline = false;
   bool _filtersOpen = false;
+  int? _pinnedRadioId;
+  int? _pinnedAntennaId;
+  int? _hoverRadioId;
+  int? _hoverAntennaId;
   QsoAgeFilter _ageFilter = QsoAgeFilter.all;
   int _ageCustomMinutes = 15; // used when _ageFilter == custom (1-60 min)
   double _minSnr = -30; // dB
@@ -70,7 +76,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void initState() {
     super.initState();
     // 200 ms tick: drives both the live-decode fade AND the flowing PSK dots.
-    _fadeTick = Timer.periodic(const Duration(milliseconds: 200), (_) => setState(() {}));
+    _fadeTick = Timer.periodic(
+      const Duration(milliseconds: 200),
+      (_) => setState(() {}),
+    );
   }
 
   @override
@@ -83,21 +92,36 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    // Read QSOs from the filtered logbook stream so enrichment filters (radio,
-    // antenna, review status, rating) apply here too.
+    // Normal map QSOs keep using the regular logbook filters. Equipment
+    // comparison is map-local and uses the complete QSO set below.
     final qsos = ref.watch(logbookProvider).valueOrNull ?? const [];
+    final allQsos = ref.watch(allQsosProvider).valueOrNull ?? const <Qso>[];
     final decodes = ref.watch(liveDecodesProvider);
     final mySettings = ref.watch(settingsProvider);
     final myLatLng = gridToLatLng(mySettings.myGrid);
     final unit = mySettings.distanceUnit;
     final resolver = ref.watch(callsignResolverProvider);
-    final pskSpots = ref.watch(pskSpotsProvider).valueOrNull ?? const <PskSpot>[];
+    final pskSpots =
+        ref.watch(pskSpotsProvider).valueOrNull ?? const <PskSpot>[];
     final pskLoading = ref.watch(pskSpotsProvider).isLoading;
-    final workedCalls = ref.watch(workedCallsignsProvider).valueOrNull ?? const <String>{};
-    final qsoColor    = mySettings.qsoColor;
+    final workedCalls =
+        ref.watch(workedCallsignsProvider).valueOrNull ?? const <String>{};
+    final qsoColor = mySettings.qsoColor;
     final decodeColor = mySettings.decodeColor;
-    final pskColor    = mySettings.pskColor;
-    final meColor     = mySettings.meColor;
+    final pskColor = mySettings.pskColor;
+    final meColor = mySettings.meColor;
+    final previewRadioId = _hoverRadioId ?? _pinnedRadioId;
+    final previewAntennaId = _hoverAntennaId ?? _pinnedAntennaId;
+    final heatmapQsos = allQsos
+        .where((qso) {
+          if (previewRadioId != null && qso.radioId != previewRadioId)
+            return false;
+          if (previewAntennaId != null && qso.antennaId != previewAntennaId) {
+            return false;
+          }
+          return true;
+        })
+        .toList(growable: false);
 
     final now = DateTime.now();
     // Replay "now" is either the wallclock or the timeline scrubber value.
@@ -105,7 +129,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final ageMaxDur = _ageFilter == QsoAgeFilter.custom
         ? Duration(minutes: _ageCustomMinutes)
         : _ageFilter.maxAge;
-    final ageCutoff = ageMaxDur == null ? null : effectiveNow.subtract(ageMaxDur);
+    final ageCutoff = ageMaxDur == null
+        ? null
+        : effectiveNow.subtract(ageMaxDur);
 
     final qsoMarkers = <Marker>[];
     if (_showQsos) {
@@ -118,11 +144,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final distKm = myLatLng == null
             ? null
             : const Distance().as(LengthUnit.Kilometer, myLatLng, ll);
-        qsoMarkers.add(Marker(
-          point: ll,
-          width: 22, height: 22,
-          child: _QsoMarker(qso: q, distanceKm: distKm, unit: unit, color: qsoColor),
-        ));
+        qsoMarkers.add(
+          Marker(
+            point: ll,
+            width: 22,
+            height: 22,
+            child: _QsoMarker(
+              qso: q,
+              distanceKm: distKm,
+              unit: unit,
+              color: qsoColor,
+            ),
+          ),
+        );
       }
     }
 
@@ -134,7 +168,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         if (call == null) continue;
         if (d.decode.snr < _minSnr) continue;
         // Replay hides decodes newer than the scrubber.
-        if (_replayEnabled && d.receivedAt.toUtc().isAfter(effectiveNow)) continue;
+        if (_replayEnabled && d.receivedAt.toUtc().isAfter(effectiveNow))
+          continue;
         final hintedGrid = d.decode.cqGrid();
         final resolvedGrid = resolver.gridFor(call, seenGridHint: hintedGrid);
         if (resolvedGrid == null) continue;
@@ -146,31 +181,37 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final distKm = myLatLng == null
             ? null
             : const Distance().as(LengthUnit.Kilometer, myLatLng, ll);
-        final isNewCq = d.decode.message.trim().startsWith('CQ ') &&
+        final isNewCq =
+            d.decode.message.trim().startsWith('CQ ') &&
             !workedCalls.contains(call.toUpperCase());
-        decodeMarkers.add(Marker(
-          point: ll,
-          // Slightly larger marker + badge overhead when NEW CQ.
-          width: isNewCq ? 60 : 22, height: isNewCq ? 32 : 22,
-          child: _DecodeMarker(
-            call: call,
-            grid: resolvedGrid,
-            snr: d.decode.snr,
-            mode: d.decode.mode,
-            alpha: alpha,
-            distanceKm: distKm,
-            unit: unit,
-            gridWasHinted: hintedGrid != null,
-            color: decodeColor,
-            isNewCq: isNewCq,
+        decodeMarkers.add(
+          Marker(
+            point: ll,
+            // Slightly larger marker + badge overhead when NEW CQ.
+            width: isNewCq ? 60 : 22,
+            height: isNewCq ? 32 : 22,
+            child: _DecodeMarker(
+              call: call,
+              grid: resolvedGrid,
+              snr: d.decode.snr,
+              mode: d.decode.mode,
+              alpha: alpha,
+              distanceKm: distKm,
+              unit: unit,
+              gridWasHinted: hintedGrid != null,
+              color: decodeColor,
+              isNewCq: isNewCq,
+            ),
           ),
-        ));
+        );
         if (_showLines && myLatLng != null) {
-          decodeLines.add(Polyline(
-            points: [myLatLng, ll],
-            color: decodeColor.withOpacity(0.25 * alpha),
-            strokeWidth: 1.2,
-          ));
+          decodeLines.add(
+            Polyline(
+              points: [myLatLng, ll],
+              color: decodeColor.withOpacity(0.25 * alpha),
+              strokeWidth: 1.2,
+            ),
+          );
         }
       }
     }
@@ -182,18 +223,30 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       for (final s in pskSpots) {
         final ll = gridToLatLng(s.otherGrid);
         if (ll == null) continue;
-        final distKm = myLatLng == null ? null : const Distance().as(LengthUnit.Kilometer, myLatLng, ll);
-        pskMarkers.add(Marker(
-          point: ll,
-          width: 20, height: 20,
-          child: _PskSpotMarker(spot: s, color: pskColor, distanceKm: distKm, unit: unit),
-        ));
+        final distKm = myLatLng == null
+            ? null
+            : const Distance().as(LengthUnit.Kilometer, myLatLng, ll);
+        pskMarkers.add(
+          Marker(
+            point: ll,
+            width: 20,
+            height: 20,
+            child: _PskSpotMarker(
+              spot: s,
+              color: pskColor,
+              distanceKm: distKm,
+              unit: unit,
+            ),
+          ),
+        );
         if (_showLines && myLatLng != null) {
-          pskLines.add(Polyline(
-            points: [myLatLng, ll],
-            color: pskColor.withOpacity(0.18),
-            strokeWidth: 1,
-          ));
+          pskLines.add(
+            Polyline(
+              points: [myLatLng, ll],
+              color: pskColor.withOpacity(0.18),
+              strokeWidth: 1,
+            ),
+          );
         }
       }
     }
@@ -210,50 +263,58 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
           children: [
             _buildTileLayer(mySettings.mapStyle),
-            if (mySettings.mapStyle == MapStyle.cbscopeRetro) _RetroMapOverlay(),
+            if (mySettings.mapStyle == MapStyle.cbscopeRetro)
+              _RetroMapOverlay(),
             if (_showGreyline) _GreylineLayer(),
             if (decodeLines.isNotEmpty || pskLines.isNotEmpty)
               PolylineLayer(polylines: [...decodeLines, ...pskLines]),
             // Animated dots flowing along each PSK great-circle line.
             if (_showPskSpots && myLatLng != null && pskMarkers.isNotEmpty)
-              MarkerLayer(markers: _flowingPskDots(myLatLng, pskSpots, pskColor)),
-            // Coverage heatmap: when the user filters by radio / antenna we
-            // render per-QSO heat blobs coloured by RST received, plus a
-            // soft hull outline around all points. Overlapping blobs create
-            // the density gradient — no external heatmap package needed.
-            if (ref.watch(logbookFilterProvider).radioId != null ||
-                ref.watch(logbookFilterProvider).antennaId != null)
-              ..._coverageLayers(qsos, myLatLng),
-            MarkerLayer(markers: [...qsoMarkers, ...pskMarkers, ...decodeMarkers]),
+              MarkerLayer(
+                markers: _flowingPskDots(myLatLng, pskSpots, pskColor),
+              ),
+            if (previewRadioId != null || previewAntennaId != null)
+              HeatmapOverlay(qsos: heatmapQsos),
+            MarkerLayer(
+              markers: [...qsoMarkers, ...pskMarkers, ...decodeMarkers],
+            ),
             if (_showMe && myLatLng != null)
-              MarkerLayer(markers: [
-                Marker(
-                  point: myLatLng,
-                  width: 24, height: 24,
-                  child: Tooltip(
-                    message: 'You  ·  ${mySettings.myCall ?? ''}  ·  ${mySettings.myGrid}',
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: meColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                        boxShadow: [BoxShadow(color: meColor.withOpacity(0.4), blurRadius: 6)],
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: myLatLng,
+                    width: 24,
+                    height: 24,
+                    child: Tooltip(
+                      message:
+                          'You  ·  ${mySettings.myCall ?? ''}  ·  ${mySettings.myGrid}',
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: meColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: meColor.withOpacity(0.4),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ]),
+                ],
+              ),
           ],
         ),
 
         // WSJT connection indicator, upper-left corner, above the toolbar.
-        Positioned(
-          top: 16, left: 16,
-          child: _WsjtStatusPill(),
-        ),
+        Positioned(top: 16, left: 16, child: _WsjtStatusPill()),
         // Top toolbar: quick counts + filter open + zoom
         Positioned(
-          top: 56, left: 16, right: 16,
+          top: 56,
+          left: 16,
+          right: 16,
           child: Row(
             children: [
               _pill(
@@ -278,7 +339,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 label: pskLoading && pskMarkers.isEmpty
                     ? 'PSK…'
                     : '${pskMarkers.length} PSK',
-                active: _showPskSpots && mySettings.pskSpotDirection != PskSpotDirection.off,
+                active:
+                    _showPskSpots &&
+                    mySettings.pskSpotDirection != PskSpotDirection.off,
                 onTap: () => setState(() => _showPskSpots = !_showPskSpots),
               ),
               const SizedBox(width: 8),
@@ -287,7 +350,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 color: c.text,
                 label: 'Filters',
                 active: _filtersOpen,
-                onTap: () => setState(() => _filtersOpen = !_filtersOpen),
+                onTap: () => setState(() {
+                  _filtersOpen = !_filtersOpen;
+                  if (!_filtersOpen) {
+                    _pinnedRadioId = null;
+                    _pinnedAntennaId = null;
+                    _hoverRadioId = null;
+                    _hoverAntennaId = null;
+                  }
+                }),
               ),
               const SizedBox(width: 8),
               _pill(
@@ -309,9 +380,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 },
               ),
               const Spacer(),
-              _iconButton(Icons.zoom_out, () => _map.move(_map.camera.center, _map.camera.zoom - 1)),
+              _iconButton(
+                Icons.zoom_out,
+                () => _map.move(_map.camera.center, _map.camera.zoom - 1),
+              ),
               const SizedBox(width: 6),
-              _iconButton(Icons.zoom_in, () => _map.move(_map.camera.center, _map.camera.zoom + 1)),
+              _iconButton(
+                Icons.zoom_in,
+                () => _map.move(_map.camera.center, _map.camera.zoom + 1),
+              ),
             ],
           ),
         ),
@@ -320,14 +397,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         // so the two don't collide at the bottom of the map).
         if (!_replayEnabled)
           Positioned(
-            left: 16, bottom: 16, width: 360,
+            left: 16,
+            bottom: 16,
+            width: 360,
             child: const PropagationCard(compact: true),
           ),
 
         // Bottom: time-replay scrubber
         if (_replayEnabled)
           Positioned(
-            left: 16, right: 16, bottom: 16,
+            left: 16,
+            right: 16,
+            bottom: 16,
             child: _ReplayBar(
               at: _replayAt,
               spanHours: _replaySpanHours,
@@ -340,15 +421,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     _replayAutoplay!.cancel();
                     _replayAutoplay = null;
                   } else {
-                    _replayAutoplay = Timer.periodic(const Duration(milliseconds: 200), (_) {
-                      final now = DateTime.now().toUtc();
-                      final start = now.subtract(Duration(hours: _replaySpanHours));
-                      // Step 1% of the span per tick; wrap when we hit "now".
-                      final stepMs = (Duration(hours: _replaySpanHours).inMilliseconds * 0.01).round();
-                      var next = _replayAt.add(Duration(milliseconds: stepMs));
-                      if (next.isAfter(now)) next = start;
-                      setState(() => _replayAt = next);
-                    });
+                    _replayAutoplay = Timer.periodic(
+                      const Duration(milliseconds: 200),
+                      (_) {
+                        final now = DateTime.now().toUtc();
+                        final start = now.subtract(
+                          Duration(hours: _replaySpanHours),
+                        );
+                        // Step 1% of the span per tick; wrap when we hit "now".
+                        final stepMs =
+                            (Duration(hours: _replaySpanHours).inMilliseconds *
+                                    0.01)
+                                .round();
+                        var next = _replayAt.add(
+                          Duration(milliseconds: stepMs),
+                        );
+                        if (next.isAfter(now)) next = start;
+                        setState(() => _replayAt = next);
+                      },
+                    );
                   }
                 });
               },
@@ -362,7 +453,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
         // Right-side sliding filter panel
         Positioned(
-          top: 64, right: _filtersOpen ? 16 : -320, bottom: 16, width: 300,
+          top: 64,
+          right: _filtersOpen ? 16 : -320,
+          bottom: 16,
+          width: 300,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOut,
@@ -376,18 +470,34 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ageFilter: _ageFilter,
               ageCustomMinutes: _ageCustomMinutes,
               minSnr: _minSnr,
-              onChanged: (next) => setState(() {
-                _showQsos       = next.showQsos;
-                _showDecodes    = next.showDecodes;
-                _showLines      = next.showLines;
-                _showMe         = next.showMe;
-                _showPskSpots   = next.showPskSpots;
-                _showGreyline   = next.showGreyline;
-                _ageFilter      = next.ageFilter;
-                _ageCustomMinutes = next.ageCustomMinutes;
-                _minSnr         = next.minSnr;
+              pinnedRadioId: _pinnedRadioId,
+              pinnedAntennaId: _pinnedAntennaId,
+              hoverRadioId: _hoverRadioId,
+              hoverAntennaId: _hoverAntennaId,
+              onEquipmentChanged: (equipment) => setState(() {
+                _pinnedRadioId = equipment.pinnedRadioId;
+                _pinnedAntennaId = equipment.pinnedAntennaId;
+                _hoverRadioId = equipment.hoverRadioId;
+                _hoverAntennaId = equipment.hoverAntennaId;
               }),
-              onClose: () => setState(() => _filtersOpen = false),
+              onChanged: (next) => setState(() {
+                _showQsos = next.showQsos;
+                _showDecodes = next.showDecodes;
+                _showLines = next.showLines;
+                _showMe = next.showMe;
+                _showPskSpots = next.showPskSpots;
+                _showGreyline = next.showGreyline;
+                _ageFilter = next.ageFilter;
+                _ageCustomMinutes = next.ageCustomMinutes;
+                _minSnr = next.minSnr;
+              }),
+              onClose: () => setState(() {
+                _filtersOpen = false;
+                _pinnedRadioId = null;
+                _pinnedAntennaId = null;
+                _hoverRadioId = null;
+                _hoverAntennaId = null;
+              }),
             ),
           ),
         ),
@@ -411,19 +521,24 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         if (!forward) frac = 1.0 - frac; // reverse direction
         // Simple linear interp in lat/lon — good enough at CB distances and
         // avoids the cost of full spherical interpolation on every frame.
-        final lat = me.latitude  + (other.latitude  - me.latitude)  * frac;
+        final lat = me.latitude + (other.latitude - me.latitude) * frac;
         final lon = me.longitude + (other.longitude - me.longitude) * frac;
-        markers.add(Marker(
-          point: LatLng(lat, lon),
-          width: 6, height: 6,
-          child: Container(
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.85),
-              shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: color.withOpacity(0.6), blurRadius: 4)],
+        markers.add(
+          Marker(
+            point: LatLng(lat, lon),
+            width: 6,
+            height: 6,
+            child: Container(
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.85),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: color.withOpacity(0.6), blurRadius: 4),
+                ],
+              ),
             ),
           ),
-        ));
+        );
       }
     }
     return markers;
@@ -443,17 +558,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       final ll = gridToLatLng(q.gridsquare);
       if (ll == null) continue;
       points.add(ll);
-      circles.add(CircleMarker(
-        point: ll,
-        // 60 km base radius — bigger than a single grid square so nearby
-        // QSOs overlap into a heat gradient, but small enough that the map
-        // still shows structure.
-        radius: 60000,
-        useRadiusInMeter: true,
-        color: _rstHeatColor(q.rstRcvd).withOpacity(0.22),
-        borderColor: _rstHeatColor(q.rstRcvd).withOpacity(0.45),
-        borderStrokeWidth: 0.6,
-      ));
+      circles.add(
+        CircleMarker(
+          point: ll,
+          // 60 km base radius — bigger than a single grid square so nearby
+          // QSOs overlap into a heat gradient, but small enough that the map
+          // still shows structure.
+          radius: 60000,
+          useRadiusInMeter: true,
+          color: _rstHeatColor(q.rstRcvd).withOpacity(0.22),
+          borderColor: _rstHeatColor(q.rstRcvd).withOpacity(0.45),
+          borderStrokeWidth: 0.6,
+        ),
+      );
     }
     if (points.isEmpty) return const [];
 
@@ -464,14 +581,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     return [
       if (hull.length >= 3)
-        PolygonLayer(polygons: [
-          Polygon(
-            points: _convexHull(hull), // re-hull after possibly adding `me`
-            color: const Color(0xFF00E5FF).withOpacity(0.05),
-            borderColor: const Color(0xFF00E5FF).withOpacity(0.55),
-            borderStrokeWidth: 1.2,
-          ),
-        ]),
+        PolygonLayer(
+          polygons: [
+            Polygon(
+              points: _convexHull(hull), // re-hull after possibly adding `me`
+              color: const Color(0xFF00E5FF).withOpacity(0.05),
+              borderColor: const Color(0xFF00E5FF).withOpacity(0.55),
+              borderStrokeWidth: 1.2,
+            ),
+          ],
+        ),
       CircleLayer(circles: circles),
     ];
   }
@@ -482,14 +601,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final n = rst == null
         ? null
         : int.tryParse(rst.trim().replaceAll(RegExp(r'[^-0-9]'), ''));
-    if (n == null) return const Color(0xFF888888); // neutral grey when no report
+    if (n == null)
+      return const Color(0xFF888888); // neutral grey when no report
     final clamped = n.clamp(-30, 10).toDouble();
     final t = (clamped + 30) / 40.0; // 0..1
     // Piecewise interpolation red → orange → yellow → green → cyan.
     Color lerp(Color a, Color b, double x) => Color.lerp(a, b, x.clamp(0, 1))!;
-    if (t < 0.33) return lerp(const Color(0xFFFF3B4E), const Color(0xFFFFB000), t / 0.33);
-    if (t < 0.66) return lerp(const Color(0xFFFFB000), const Color(0xFF00FF88), (t - 0.33) / 0.33);
-    return           lerp(const Color(0xFF00FF88), const Color(0xFF00E5FF), (t - 0.66) / 0.34);
+    if (t < 0.33)
+      return lerp(const Color(0xFFFF3B4E), const Color(0xFFFFB000), t / 0.33);
+    if (t < 0.66)
+      return lerp(
+        const Color(0xFFFFB000),
+        const Color(0xFF00FF88),
+        (t - 0.33) / 0.33,
+      );
+    return lerp(
+      const Color(0xFF00FF88),
+      const Color(0xFF00E5FF),
+      (t - 0.66) / 0.34,
+    );
   }
 
   /// Andrew's monotone-chain convex hull. O(n log n). Returns points ordered
@@ -497,22 +627,26 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   List<LatLng> _convexHull(List<LatLng> input) {
     if (input.length <= 2) return List.of(input);
     final pts = List<LatLng>.from(input)
-      ..sort((a, b) => a.longitude != b.longitude
-          ? a.longitude.compareTo(b.longitude)
-          : a.latitude.compareTo(b.latitude));
+      ..sort(
+        (a, b) => a.longitude != b.longitude
+            ? a.longitude.compareTo(b.longitude)
+            : a.latitude.compareTo(b.latitude),
+      );
     double cross(LatLng o, LatLng a, LatLng b) =>
         (a.longitude - o.longitude) * (b.latitude - o.latitude) -
-        (a.latitude  - o.latitude)  * (b.longitude - o.longitude);
+        (a.latitude - o.latitude) * (b.longitude - o.longitude);
     final lower = <LatLng>[];
     for (final p in pts) {
-      while (lower.length >= 2 && cross(lower[lower.length - 2], lower.last, p) <= 0) {
+      while (lower.length >= 2 &&
+          cross(lower[lower.length - 2], lower.last, p) <= 0) {
         lower.removeLast();
       }
       lower.add(p);
     }
     final upper = <LatLng>[];
     for (final p in pts.reversed) {
-      while (upper.length >= 2 && cross(upper[upper.length - 2], upper.last, p) <= 0) {
+      while (upper.length >= 2 &&
+          cross(upper[upper.length - 2], upper.last, p) <= 0) {
         upper.removeLast();
       }
       upper.add(p);
@@ -530,8 +664,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     for (int i = 0, j = poly.length - 1; i < poly.length; j = i++) {
       final xi = poly[i].longitude, yi = poly[i].latitude;
       final xj = poly[j].longitude, yj = poly[j].latitude;
-      final intersect = ((yi > p.latitude) != (yj > p.latitude)) &&
-          (p.longitude < (xj - xi) * (p.latitude - yi) / (yj - yi + 1e-12) + xi);
+      final intersect =
+          ((yi > p.latitude) != (yj > p.latitude)) &&
+          (p.longitude <
+              (xj - xi) * (p.latitude - yi) / (yj - yi + 1e-12) + xi);
       if (intersect) inside = !inside;
     }
     return inside;
@@ -549,7 +685,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // whole map the retro terminal glow. Regular = OpenStreetMap standard.
     if (style == MapStyle.cbscopeRetro) {
       return TileLayer(
-        urlTemplate: 'https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png',
+        urlTemplate:
+            'https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png',
         subdomains: const ['a', 'b', 'c', 'd'],
         userAgentPackageName: 'app.cbscope',
         tileProvider: NetworkTileProvider(),
@@ -559,12 +696,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           return ColorFiltered(
             colorFilter: const ColorFilter.matrix(<double>[
               // R' — kill red so nothing looks warm.
-              0.02, 0.02, 0.02, 0,  0,
+              0.02, 0.02, 0.02, 0, 0,
               // G' — moderate boost, contributes to cyan.
               0.12, 0.90, 0.35, 0, 14,
               // B' — brightest channel, pushes the whole map into cyan.
               0.15, 0.55, 1.10, 0, 22,
-              0,    0,    0,    1,  0,
+              0, 0, 0, 1, 0,
             ]),
             child: tileWidget,
           );
@@ -573,7 +710,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
     return TileLayer(
       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      userAgentPackageName: 'net.xzgroup.cbscope',
+      userAgentPackageName: 'app.cbscope',
       tileProvider: NetworkTileProvider(),
     );
   }
@@ -595,7 +732,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 8, height: 8,
+              width: 8,
+              height: 8,
               decoration: BoxDecoration(
                 color: active ? color : c.subtle,
                 shape: BoxShape.circle,
@@ -604,10 +742,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             const SizedBox(width: 8),
             Icon(icon, size: 14, color: active ? c.text : c.subtle),
             const SizedBox(width: 6),
-            Text(label,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: active ? c.text : c.subtle,
-                    )),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: active ? c.text : c.subtle,
+              ),
+            ),
           ],
         ),
       ),
@@ -619,7 +759,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 32, height: 32,
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(
           color: c.card.withOpacity(0.92),
           borderRadius: BorderRadius.circular(8),
@@ -632,22 +773,57 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 }
 
 class _FilterState {
-  final bool showQsos, showDecodes, showLines, showMe, showPskSpots, showGreyline;
+  final bool showQsos,
+      showDecodes,
+      showLines,
+      showMe,
+      showPskSpots,
+      showGreyline;
   final QsoAgeFilter ageFilter;
   final int ageCustomMinutes;
   final double minSnr;
   const _FilterState({
-    required this.showQsos, required this.showDecodes, required this.showLines,
-    required this.showMe, required this.showPskSpots, required this.showGreyline,
-    required this.ageFilter, required this.ageCustomMinutes, required this.minSnr,
+    required this.showQsos,
+    required this.showDecodes,
+    required this.showLines,
+    required this.showMe,
+    required this.showPskSpots,
+    required this.showGreyline,
+    required this.ageFilter,
+    required this.ageCustomMinutes,
+    required this.minSnr,
+  });
+}
+
+class _EquipmentPreviewState {
+  final int? pinnedRadioId;
+  final int? pinnedAntennaId;
+  final int? hoverRadioId;
+  final int? hoverAntennaId;
+
+  const _EquipmentPreviewState({
+    required this.pinnedRadioId,
+    required this.pinnedAntennaId,
+    required this.hoverRadioId,
+    required this.hoverAntennaId,
   });
 }
 
 class _FilterPanel extends ConsumerWidget {
-  final bool showQsos, showDecodes, showLines, showMe, showPskSpots, showGreyline;
+  final bool showQsos,
+      showDecodes,
+      showLines,
+      showMe,
+      showPskSpots,
+      showGreyline;
   final QsoAgeFilter ageFilter;
   final int ageCustomMinutes;
   final double minSnr;
+  final int? pinnedRadioId;
+  final int? pinnedAntennaId;
+  final int? hoverRadioId;
+  final int? hoverAntennaId;
+  final ValueChanged<_EquipmentPreviewState> onEquipmentChanged;
   final ValueChanged<_FilterState> onChanged;
   final VoidCallback onClose;
 
@@ -661,6 +837,11 @@ class _FilterPanel extends ConsumerWidget {
     required this.ageFilter,
     required this.ageCustomMinutes,
     required this.minSnr,
+    required this.pinnedRadioId,
+    required this.pinnedAntennaId,
+    required this.hoverRadioId,
+    required this.hoverAntennaId,
+    required this.onEquipmentChanged,
     required this.onChanged,
     required this.onClose,
   });
@@ -675,7 +856,13 @@ class _FilterPanel extends ConsumerWidget {
         color: c.card,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: c.border),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 20, offset: const Offset(0, 6))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -707,110 +894,199 @@ class _FilterPanel extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-              _section(context, 'Layers'),
-              _switchRow(context, 'Logged QSOs',        showQsos,     (v) => _emit(showQsos: v)),
-              _switchRow(context, 'Live decodes',       showDecodes,  (v) => _emit(showDecodes: v)),
-              _switchRow(context, 'PSK Reporter spots', showPskSpots, (v) => _emit(showPskSpots: v)),
-              _switchRow(context, 'Great-circle lines', showLines,    (v) => _emit(showLines: v)),
-              _switchRow(context, 'My location',        showMe,       (v) => _emit(showMe: v)),
-              _switchRow(context, 'Greyline (day / night)', showGreyline, (v) => _emit(showGreyline: v)),
-              const SizedBox(height: 16),
-              _section(context, 'PSK Reporter (my callsign)'),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6, runSpacing: 6,
-                children: [
-                  for (final d in PskSpotDirection.values)
-                    _chipToggle(context, _pskDirLabel(d), settings.pskSpotDirection == d, () {
-                      ref.read(settingsProvider.notifier).update(settings.copyWith(pskSpotDirection: d));
-                    }),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _section(context, 'PSK — timespan'),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6, runSpacing: 6,
-                children: [
-                  for (final w in PskSpotWindow.values)
-                    _chipToggle(context, w.label, settings.pskSpotWindow == w, () {
-                      ref.read(settingsProvider.notifier).update(settings.copyWith(pskSpotWindow: w));
-                    }),
-                ],
-              ),
-              if (settings.pskSpotWindow == PskSpotWindow.custom) ...[
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Slider(
-                        value: settings.pskSpotCustomMinutes.toDouble().clamp(1, 60),
-                        min: 1, max: 60, divisions: 59,
-                        label: '${settings.pskSpotCustomMinutes} min',
-                        onChanged: (v) {
-                          ref.read(settingsProvider.notifier).update(
-                                settings.copyWith(pskSpotCustomMinutes: v.round()),
-                              );
-                        },
-                      ),
-                    ),
-                    SizedBox(width: 52,
-                      child: Text('${settings.pskSpotCustomMinutes} min',
-                          style: t.bodySmall, textAlign: TextAlign.right)),
-                  ],
-                ),
-              ],
-              if (settings.myCall == null || settings.myCall!.isEmpty) ...[
-                const SizedBox(height: 6),
-                Text('Set your callsign in Settings to enable PSK Reporter spots.',
-                    style: t.bodySmall?.copyWith(color: c.warning)),
-              ],
-              const SizedBox(height: 16),
-              _section(context, 'QSOs — age'),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6, runSpacing: 6,
-                children: [
-                  for (final f in QsoAgeFilter.values)
-                    _chipToggle(context, f.label, ageFilter == f, () => _emit(ageFilter: f)),
-                ],
-              ),
-              if (ageFilter == QsoAgeFilter.custom) ...[
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Slider(
-                        value: ageCustomMinutes.toDouble().clamp(1, 60),
-                        min: 1, max: 60, divisions: 59,
-                        label: '$ageCustomMinutes min',
-                        onChanged: (v) => _emit(ageCustomMinutes: v.round()),
-                      ),
-                    ),
-                    SizedBox(width: 58,
-                      child: Text('$ageCustomMinutes min',
-                          style: t.bodySmall, textAlign: TextAlign.right)),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 16),
-              _EnrichmentFilters(),
-              const SizedBox(height: 16),
-              _section(context, 'Live decodes — min SNR'),
-              Row(
-                children: [
-                  Expanded(
-                    child: Slider(
-                      value: minSnr,
-                      min: -30, max: 10, divisions: 40,
-                      label: '${minSnr.round()} dB',
-                      onChanged: (v) => _emit(minSnr: v),
-                    ),
+                  _section(context, 'Layers'),
+                  _switchRow(
+                    context,
+                    'Logged QSOs',
+                    showQsos,
+                    (v) => _emit(showQsos: v),
                   ),
-                  SizedBox(width: 46, child: Text('${minSnr.round()} dB',
-                    style: t.bodySmall, textAlign: TextAlign.right)),
-                ],
-              ),
+                  _switchRow(
+                    context,
+                    'Live decodes',
+                    showDecodes,
+                    (v) => _emit(showDecodes: v),
+                  ),
+                  _switchRow(
+                    context,
+                    'PSK Reporter spots',
+                    showPskSpots,
+                    (v) => _emit(showPskSpots: v),
+                  ),
+                  _switchRow(
+                    context,
+                    'Great-circle lines',
+                    showLines,
+                    (v) => _emit(showLines: v),
+                  ),
+                  _switchRow(
+                    context,
+                    'My location',
+                    showMe,
+                    (v) => _emit(showMe: v),
+                  ),
+                  _switchRow(
+                    context,
+                    'Greyline (day / night)',
+                    showGreyline,
+                    (v) => _emit(showGreyline: v),
+                  ),
+                  const SizedBox(height: 16),
+                  _section(context, 'PSK Reporter (my callsign)'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final d in PskSpotDirection.values)
+                        _chipToggle(
+                          context,
+                          _pskDirLabel(d),
+                          settings.pskSpotDirection == d,
+                          () {
+                            ref
+                                .read(settingsProvider.notifier)
+                                .update(settings.copyWith(pskSpotDirection: d));
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _section(context, 'PSK — timespan'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final w in PskSpotWindow.values)
+                        _chipToggle(
+                          context,
+                          w.label,
+                          settings.pskSpotWindow == w,
+                          () {
+                            ref
+                                .read(settingsProvider.notifier)
+                                .update(settings.copyWith(pskSpotWindow: w));
+                          },
+                        ),
+                    ],
+                  ),
+                  if (settings.pskSpotWindow == PskSpotWindow.custom) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Slider(
+                            value: settings.pskSpotCustomMinutes
+                                .toDouble()
+                                .clamp(1, 60),
+                            min: 1,
+                            max: 60,
+                            divisions: 59,
+                            label: '${settings.pskSpotCustomMinutes} min',
+                            onChanged: (v) {
+                              ref
+                                  .read(settingsProvider.notifier)
+                                  .update(
+                                    settings.copyWith(
+                                      pskSpotCustomMinutes: v.round(),
+                                    ),
+                                  );
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 52,
+                          child: Text(
+                            '${settings.pskSpotCustomMinutes} min',
+                            style: t.bodySmall,
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (settings.myCall == null || settings.myCall!.isEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Set your callsign in Settings to enable PSK Reporter spots.',
+                      style: t.bodySmall?.copyWith(color: c.warning),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  _section(context, 'QSOs — age'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final f in QsoAgeFilter.values)
+                        _chipToggle(
+                          context,
+                          f.label,
+                          ageFilter == f,
+                          () => _emit(ageFilter: f),
+                        ),
+                    ],
+                  ),
+                  if (ageFilter == QsoAgeFilter.custom) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Slider(
+                            value: ageCustomMinutes.toDouble().clamp(1, 60),
+                            min: 1,
+                            max: 60,
+                            divisions: 59,
+                            label: '$ageCustomMinutes min',
+                            onChanged: (v) =>
+                                _emit(ageCustomMinutes: v.round()),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 58,
+                          child: Text(
+                            '$ageCustomMinutes min',
+                            style: t.bodySmall,
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  _EquipmentHeatmapControls(
+                    pinnedRadioId: pinnedRadioId,
+                    pinnedAntennaId: pinnedAntennaId,
+                    hoverRadioId: hoverRadioId,
+                    hoverAntennaId: hoverAntennaId,
+                    onChanged: onEquipmentChanged,
+                  ),
+                  const SizedBox(height: 16),
+                  _section(context, 'Live decodes — min SNR'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Slider(
+                          value: minSnr,
+                          min: -30,
+                          max: 10,
+                          divisions: 40,
+                          label: '${minSnr.round()} dB',
+                          onChanged: (v) => _emit(minSnr: v),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 46,
+                        child: Text(
+                          '${minSnr.round()} dB',
+                          style: t.bodySmall,
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -820,47 +1096,65 @@ class _FilterPanel extends ConsumerWidget {
     );
   }
 
-
   void _emit({
-    bool? showQsos, bool? showDecodes, bool? showLines, bool? showMe, bool? showPskSpots, bool? showGreyline,
-    QsoAgeFilter? ageFilter, int? ageCustomMinutes, double? minSnr,
+    bool? showQsos,
+    bool? showDecodes,
+    bool? showLines,
+    bool? showMe,
+    bool? showPskSpots,
+    bool? showGreyline,
+    QsoAgeFilter? ageFilter,
+    int? ageCustomMinutes,
+    double? minSnr,
   }) {
-    onChanged(_FilterState(
-      showQsos:         showQsos         ?? this.showQsos,
-      showDecodes:      showDecodes      ?? this.showDecodes,
-      showLines:        showLines        ?? this.showLines,
-      showMe:           showMe           ?? this.showMe,
-      showPskSpots:     showPskSpots     ?? this.showPskSpots,
-      showGreyline:     showGreyline     ?? this.showGreyline,
-      ageFilter:        ageFilter        ?? this.ageFilter,
-      ageCustomMinutes: ageCustomMinutes ?? this.ageCustomMinutes,
-      minSnr:           minSnr           ?? this.minSnr,
-    ));
+    onChanged(
+      _FilterState(
+        showQsos: showQsos ?? this.showQsos,
+        showDecodes: showDecodes ?? this.showDecodes,
+        showLines: showLines ?? this.showLines,
+        showMe: showMe ?? this.showMe,
+        showPskSpots: showPskSpots ?? this.showPskSpots,
+        showGreyline: showGreyline ?? this.showGreyline,
+        ageFilter: ageFilter ?? this.ageFilter,
+        ageCustomMinutes: ageCustomMinutes ?? this.ageCustomMinutes,
+        minSnr: minSnr ?? this.minSnr,
+      ),
+    );
   }
 
   String _pskDirLabel(PskSpotDirection d) => switch (d) {
-        PskSpotDirection.off      => 'Off',
-        PskSpotDirection.sent     => 'Heard me',
-        PskSpotDirection.received => 'I heard',
-        PskSpotDirection.both     => 'Both',
-      };
+    PskSpotDirection.off => 'Off',
+    PskSpotDirection.sent => 'Heard me',
+    PskSpotDirection.received => 'I heard',
+    PskSpotDirection.both => 'Both',
+  };
 
-  Widget _section(BuildContext context, String label) => Text(
-        label.toUpperCase(),
-        style: Theme.of(context).textTheme.labelSmall,
-      );
+  Widget _section(BuildContext context, String label) =>
+      Text(label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall);
 
-  Widget _switchRow(BuildContext context, String label, bool value, ValueChanged<bool> onChanged) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
-            Switch.adaptive(value: value, onChanged: onChanged),
-          ],
+  Widget _switchRow(
+    BuildContext context,
+    String label,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
         ),
-      );
+        Switch.adaptive(value: value, onChanged: onChanged),
+      ],
+    ),
+  );
 
-  Widget _chipToggle(BuildContext context, String label, bool selected, VoidCallback onTap) {
+  Widget _chipToggle(
+    BuildContext context,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) {
     final c = context.colors;
     final t = Theme.of(context).textTheme;
     return GestureDetector(
@@ -872,11 +1166,13 @@ class _FilterPanel extends ConsumerWidget {
           border: Border.all(color: selected ? c.accent : c.border),
           borderRadius: BorderRadius.circular(999),
         ),
-        child: Text(label,
+        child: Text(
+          label,
           style: t.bodySmall?.copyWith(
             color: selected ? c.accent : c.text,
             fontWeight: selected ? FontWeight.w600 : null,
-          )),
+          ),
+        ),
       ),
     );
   }
@@ -888,11 +1184,15 @@ class _QsoMarker extends StatelessWidget {
   final double? distanceKm;
   final DistanceUnit unit;
   final Color color;
-  const _QsoMarker({required this.qso, this.distanceKm, required this.unit, required this.color});
+  const _QsoMarker({
+    required this.qso,
+    this.distanceKm,
+    required this.unit,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     return Tooltip(
       waitDuration: const Duration(milliseconds: 250),
       richMessage: WidgetSpan(
@@ -900,7 +1200,10 @@ class _QsoMarker extends StatelessWidget {
         baseline: TextBaseline.alphabetic,
         child: _QsoTooltipCard(qso: qso, distanceKm: distanceKm, unit: unit),
       ),
-      decoration: BoxDecoration(color: Colors.transparent, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+      ),
       padding: EdgeInsets.zero,
       margin: const EdgeInsets.all(6),
       preferBelow: false,
@@ -911,12 +1214,18 @@ class _QsoMarker extends StatelessWidget {
           onDoubleTap: () => showStationProfile(context, qso.call),
           child: Center(
             child: Container(
-              width: 10, height: 10,
+              width: 10,
+              height: 10,
               decoration: BoxDecoration(
                 color: color.withOpacity(0.88),
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white.withOpacity(0.9), width: 1.4),
-                boxShadow: [BoxShadow(color: color.withOpacity(0.35), blurRadius: 4)],
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.9),
+                  width: 1.4,
+                ),
+                boxShadow: [
+                  BoxShadow(color: color.withOpacity(0.35), blurRadius: 4),
+                ],
               ),
             ),
           ),
@@ -930,7 +1239,11 @@ class _QsoTooltipCard extends StatelessWidget {
   final Qso qso;
   final double? distanceKm;
   final DistanceUnit unit;
-  const _QsoTooltipCard({required this.qso, this.distanceKm, required this.unit});
+  const _QsoTooltipCard({
+    required this.qso,
+    this.distanceKm,
+    required this.unit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -944,7 +1257,13 @@ class _QsoTooltipCard extends StatelessWidget {
           color: c.card,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: c.border),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 12, offset: const Offset(0, 4))],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -964,15 +1283,25 @@ class _QsoTooltipCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              Text(df.format(qso.timeOn.toUtc()),
-                  style: t.bodySmall?.copyWith(fontFamily: 'Menlo')),
+              Text(
+                df.format(qso.timeOn.toUtc()),
+                style: t.bodySmall?.copyWith(fontFamily: 'Menlo'),
+              ),
               const SizedBox(height: 8),
               _kv(context, 'Grid', qso.gridsquare ?? '—'),
-              _kv(context, 'RST S/R', '${qso.rstSent ?? '-'} / ${qso.rstRcvd ?? '-'}'),
-              if (qso.name != null && qso.name!.isNotEmpty)  _kv(context, 'Name', qso.name!),
-              if (qso.country != null && qso.country!.isNotEmpty) _kv(context, 'Country', qso.country!),
-              if (qso.comment != null && qso.comment!.isNotEmpty) _kv(context, 'Comment', qso.comment!),
-              if (qso.myGrid != null && qso.myGrid!.isNotEmpty) _kv(context, 'My QTH', qso.myGrid!),
+              _kv(
+                context,
+                'RST S/R',
+                '${qso.rstSent ?? '-'} / ${qso.rstRcvd ?? '-'}',
+              ),
+              if (qso.name != null && qso.name!.isNotEmpty)
+                _kv(context, 'Name', qso.name!),
+              if (qso.country != null && qso.country!.isNotEmpty)
+                _kv(context, 'Country', qso.country!),
+              if (qso.comment != null && qso.comment!.isNotEmpty)
+                _kv(context, 'Comment', qso.comment!),
+              if (qso.myGrid != null && qso.myGrid!.isNotEmpty)
+                _kv(context, 'My QTH', qso.myGrid!),
               _WeatherRow(rawFields: qso.rawFields),
               if (distanceKm != null) ...[
                 const Divider(height: 12),
@@ -980,8 +1309,10 @@ class _QsoTooltipCard extends StatelessWidget {
                   children: [
                     Icon(Icons.straighten, size: 12, color: c.subtle),
                     const SizedBox(width: 6),
-                    Text('${unit.from(distanceKm!).toStringAsFixed(0)} ${unit.label}',
-                        style: t.bodySmall),
+                    Text(
+                      '${unit.from(distanceKm!).toStringAsFixed(0)} ${unit.label}',
+                      style: t.bodySmall,
+                    ),
                   ],
                 ),
               ],
@@ -1000,7 +1331,10 @@ class _QsoTooltipCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 68, child: Text(k, style: t.labelSmall?.copyWith(color: c.subtle))),
+          SizedBox(
+            width: 68,
+            child: Text(k, style: t.labelSmall?.copyWith(color: c.subtle)),
+          ),
           Expanded(child: Text(v, style: t.bodySmall)),
         ],
       ),
@@ -1035,27 +1369,33 @@ class _GreylineLayer extends StatelessWidget {
     final poleLat = northernSummer ? -85.0 : 85.0;
     final poly = <LatLng>[
       ...result.terminator,
-      LatLng(poleLat,  180),
+      LatLng(poleLat, 180),
       LatLng(poleLat, -180),
     ];
-    return Stack(children: [
-      PolygonLayer(polygons: [
-        Polygon(
-          points: poly,
-          color: Colors.black.withOpacity(0.30),
-          borderColor: Colors.transparent,
-          borderStrokeWidth: 0,
+    return Stack(
+      children: [
+        PolygonLayer(
+          polygons: [
+            Polygon(
+              points: poly,
+              color: Colors.black.withOpacity(0.30),
+              borderColor: Colors.transparent,
+              borderStrokeWidth: 0,
+            ),
+          ],
         ),
-      ]),
-      PolylineLayer(polylines: [
-        Polyline(
-          points: result.terminator,
-          color: c.warning.withOpacity(0.75),
-          strokeWidth: 1.4,
-          pattern: StrokePattern.dashed(segments: const [8.0, 6.0]),
+        PolylineLayer(
+          polylines: [
+            Polyline(
+              points: result.terminator,
+              color: c.warning.withOpacity(0.75),
+              strokeWidth: 1.4,
+              pattern: StrokePattern.dashed(segments: const [8.0, 6.0]),
+            ),
+          ],
         ),
-      ]),
-    ]);
+      ],
+    );
   }
 }
 
@@ -1074,26 +1414,43 @@ class _WsjtStatusPillState extends ConsumerState<_WsjtStatusPill> {
     super.initState();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
   }
+
   @override
-  void dispose() { _tick?.cancel(); super.dispose(); }
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final udp = ref.watch(udpListenerProvider);
     final last = udp.lastPacketAt;
-    final connected = last != null && DateTime.now().difference(last).inSeconds < 20;
+    final connected =
+        last != null && DateTime.now().difference(last).inSeconds < 20;
     final c = context.colors;
     final t = Theme.of(context).textTheme;
     return AppCard(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       color: c.card.withOpacity(0.92),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 8, height: 8, color: connected ? c.success : c.subtle),
-        const SizedBox(width: 8),
-        Text('WSJT-CB', style: t.labelSmall),
-        const SizedBox(width: 6),
-        Text(connected ? 'CONNECTED' : 'WAITING',
-            style: t.labelSmall?.copyWith(color: connected ? c.success : c.subtle)),
-      ]),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            color: connected ? c.success : c.subtle,
+          ),
+          const SizedBox(width: 8),
+          Text('WSJT-CB', style: t.labelSmall),
+          const SizedBox(width: 6),
+          Text(
+            connected ? 'CONNECTED' : 'WAITING',
+            style: t.labelSmall?.copyWith(
+              color: connected ? c.success : c.subtle,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1127,7 +1484,12 @@ class _ReplayBar extends StatelessWidget {
     final now = DateTime.now().toUtc();
     final start = now.subtract(Duration(hours: spanHours));
     final total = now.difference(start).inMilliseconds.toDouble();
-    final pos   = at.toUtc().difference(start).inMilliseconds.toDouble().clamp(0.0, total);
+    final pos = at
+        .toUtc()
+        .difference(start)
+        .inMilliseconds
+        .toDouble()
+        .clamp(0.0, total);
 
     String label(DateTime d) {
       final u = d.toUtc();
@@ -1146,57 +1508,88 @@ class _ReplayBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Icon(Icons.history, size: 14, color: c.subtle),
-              const SizedBox(width: 6),
-              Text('REPLAY', style: t.labelSmall),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: onPlayToggle,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: (autoplay ? c.accent : c.surface),
-                    border: Border.all(color: c.border),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(autoplay ? Icons.pause : Icons.play_arrow,
-                        size: 12, color: autoplay ? Colors.black : c.text),
-                    const SizedBox(width: 4),
-                    Text(autoplay ? 'PAUSE' : 'PLAY',
-                        style: t.labelSmall?.copyWith(
-                          color: autoplay ? Colors.black : c.text, fontWeight: FontWeight.w700)),
-                  ]),
-                ),
-              ),
-              const SizedBox(width: 10),
-              // Span-of-history selector (few common presets).
-              for (final h in const [6, 24, 72])
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: GestureDetector(
-                    onTap: () => onSpanChanged(h),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: spanHours == h ? c.accent.withOpacity(0.15) : c.surface,
-                        border: Border.all(color: spanHours == h ? c.accent : c.border),
-                      ),
-                      child: Text('${h}h', style: t.labelSmall?.copyWith(
-                        color: spanHours == h ? c.accent : c.subtle,
-                        fontWeight: FontWeight.w700)),
+            Row(
+              children: [
+                Icon(Icons.history, size: 14, color: c.subtle),
+                const SizedBox(width: 6),
+                Text('REPLAY', style: t.labelSmall),
+                const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: onPlayToggle,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (autoplay ? c.accent : c.surface),
+                      border: Border.all(color: c.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          autoplay ? Icons.pause : Icons.play_arrow,
+                          size: 12,
+                          color: autoplay ? Colors.black : c.text,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          autoplay ? 'PAUSE' : 'PLAY',
+                          style: t.labelSmall?.copyWith(
+                            color: autoplay ? Colors.black : c.text,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              const Spacer(),
-              Text(label(at), style: t.bodySmall?.copyWith(fontFamily: 'Menlo')),
-              const SizedBox(width: 4),
-              InkWell(
-                onTap: onClose,
-                child: Padding(padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.close, size: 14, color: c.subtle)),
-              ),
-            ]),
+                const SizedBox(width: 10),
+                // Span-of-history selector (few common presets).
+                for (final h in const [6, 24, 72])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: GestureDetector(
+                      onTap: () => onSpanChanged(h),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: spanHours == h
+                              ? c.accent.withOpacity(0.15)
+                              : c.surface,
+                          border: Border.all(
+                            color: spanHours == h ? c.accent : c.border,
+                          ),
+                        ),
+                        child: Text(
+                          '${h}h',
+                          style: t.labelSmall?.copyWith(
+                            color: spanHours == h ? c.accent : c.subtle,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                const Spacer(),
+                Text(
+                  label(at),
+                  style: t.bodySmall?.copyWith(fontFamily: 'Menlo'),
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: onClose,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.close, size: 14, color: c.subtle),
+                  ),
+                ),
+              ],
+            ),
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 3,
@@ -1205,8 +1598,10 @@ class _ReplayBar extends StatelessWidget {
               ),
               child: Slider(
                 value: pos,
-                min: 0, max: total <= 0 ? 1 : total,
-                onChanged: (v) => onSeek(start.add(Duration(milliseconds: v.round()))),
+                min: 0,
+                max: total <= 0 ? 1 : total,
+                onChanged: (v) =>
+                    onSeek(start.add(Duration(milliseconds: v.round()))),
               ),
             ),
           ],
@@ -1226,20 +1621,24 @@ class _WeatherRow extends StatelessWidget {
   Widget build(BuildContext context) {
     if (rawFields == null || rawFields!.isEmpty) return const SizedBox.shrink();
     Map<String, dynamic>? m;
-    try { m = jsonDecode(rawFields!) as Map<String, dynamic>; } catch (_) { return const SizedBox.shrink(); }
-    final sfi  = m['app_qsobook_sfi'];
-    final k    = m['app_qsobook_k_index'];
-    final a    = m['app_qsobook_a_index'];
-    final ss   = m['app_qsobook_sunspots'];
+    try {
+      m = jsonDecode(rawFields!) as Map<String, dynamic>;
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
+    final sfi = m['app_qsobook_sfi'];
+    final k = m['app_qsobook_k_index'];
+    final a = m['app_qsobook_a_index'];
+    final ss = m['app_qsobook_sunspots'];
     final cond = m['app_qsobook_band_condition'];
     if (sfi == null && k == null && a == null && ss == null && cond == null) {
       return const SizedBox.shrink();
     }
     final parts = <String>[
       if (sfi != null) 'SFI $sfi',
-      if (k   != null) 'K $k',
-      if (a   != null) 'A $a',
-      if (ss  != null) 'SS $ss',
+      if (k != null) 'K $k',
+      if (a != null) 'A $a',
+      if (ss != null) 'SS $ss',
       if (cond != null) 'Band: $cond',
     ];
     final t = Theme.of(context).textTheme;
@@ -1251,78 +1650,184 @@ class _WeatherRow extends StatelessWidget {
         children: [
           Icon(Icons.wb_sunny_outlined, size: 12, color: c.subtle),
           const SizedBox(width: 6),
-          Expanded(child: Text(parts.join('  ·  '),
-            style: t.labelSmall?.copyWith(color: c.subtle, fontWeight: FontWeight.w600))),
+          Expanded(
+            child: Text(
+              parts.join('  ·  '),
+              style: t.labelSmall?.copyWith(
+                color: c.subtle,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-/// Enrichment filters (antenna / radio / review status / rating) rendered
-/// as a section inside the map filter panel. Mutates the shared
-/// [logbookFilterProvider] so the Logbook screen shows the same slice.
-class _EnrichmentFilters extends ConsumerWidget {
+/// Map-local equipment comparison controls.
+///
+/// Hovering previews a radio/antenna immediately. Clicking pins it, allowing
+/// the other equipment category to be hovered for quick intersections.
+class _EquipmentHeatmapControls extends ConsumerWidget {
+  final int? pinnedRadioId;
+  final int? pinnedAntennaId;
+  final int? hoverRadioId;
+  final int? hoverAntennaId;
+  final ValueChanged<_EquipmentPreviewState> onChanged;
+
+  const _EquipmentHeatmapControls({
+    required this.pinnedRadioId,
+    required this.pinnedAntennaId,
+    required this.hoverRadioId,
+    required this.hoverAntennaId,
+    required this.onChanged,
+  });
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = Theme.of(context).textTheme;
     final c = context.colors;
-    final f = ref.watch(logbookFilterProvider);
     final antennas = ref.watch(antennasProvider).valueOrNull ?? const [];
-    final rigs     = ref.watch(rigsProvider).valueOrNull ?? const [];
-    void update({
-      int? antennaId, int? radioId,
-      bool clearAntenna = false, bool clearRadio = false,
+    final rigs = ref.watch(rigsProvider).valueOrNull ?? const [];
+
+    void emit({
+      int? pinnedRadio,
+      int? pinnedAntenna,
+      int? hoverRadio,
+      int? hoverAntenna,
+      bool clearPinnedRadio = false,
+      bool clearPinnedAntenna = false,
+      bool clearHoverRadio = false,
+      bool clearHoverAntenna = false,
     }) {
-      ref.read(logbookFilterProvider.notifier).state = (
-        search: f.search,
-        band: f.band,
-        mode: f.mode,
-        antennaId: clearAntenna ? null : (antennaId ?? f.antennaId),
-        radioId:   clearRadio   ? null : (radioId   ?? f.radioId),
-        minRating: f.minRating,
-        reviewState: f.reviewState,
+      onChanged(
+        _EquipmentPreviewState(
+          pinnedRadioId: clearPinnedRadio
+              ? null
+              : (pinnedRadio ?? pinnedRadioId),
+          pinnedAntennaId: clearPinnedAntenna
+              ? null
+              : (pinnedAntenna ?? pinnedAntennaId),
+          hoverRadioId: clearHoverRadio ? null : (hoverRadio ?? hoverRadioId),
+          hoverAntennaId: clearHoverAntenna
+              ? null
+              : (hoverAntenna ?? hoverAntennaId),
+        ),
       );
     }
 
-    Widget chip(String label, bool selected, VoidCallback onTap) => GestureDetector(
+    Widget chip({
+      required String label,
+      required bool pinned,
+      required bool previewed,
+      required VoidCallback onTap,
+      required VoidCallback onEnter,
+      required VoidCallback onExit,
+    }) {
+      final active = pinned || previewed;
+      return MouseRegion(
+        onEnter: (_) => onEnter(),
+        onExit: (_) => onExit(),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
           onTap: onTap,
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 90),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: selected ? c.accent.withOpacity(0.14) : c.surface,
-              border: Border.all(color: selected ? c.accent : c.border),
+              color: active
+                  ? c.accent.withOpacity(pinned ? 0.20 : 0.10)
+                  : c.surface,
+              border: Border.all(
+                color: active ? c.accent : c.border,
+                width: pinned ? 1.5 : 1,
+              ),
             ),
-            child: Text(label, style: t.bodySmall?.copyWith(
-              color: selected ? c.accent : c.text,
-              fontWeight: selected ? FontWeight.w700 : null,
-            )),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (pinned) ...[
+                  Icon(Icons.push_pin, size: 11, color: c.accent),
+                  const SizedBox(width: 4),
+                ],
+                Text(
+                  label,
+                  style: t.bodySmall?.copyWith(
+                    color: active ? c.accent : c.text,
+                    fontWeight: pinned ? FontWeight.w800 : null,
+                  ),
+                ),
+              ],
+            ),
           ),
-        );
+        ),
+      );
+    }
 
-    // Review status + rating filters intentionally live only on the Logbook
-    // screen — the map should stay a lightweight geo view.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text('EQUIPMENT HEATMAP', style: t.labelSmall),
+        const SizedBox(height: 4),
+        Text(
+          'Hover to preview. Click to pin; then hover the other group to compare.',
+          style: t.bodySmall?.copyWith(color: c.subtle),
+        ),
         if (rigs.isNotEmpty) ...[
+          const SizedBox(height: 10),
           Text('QSOs — RADIO', style: t.labelSmall),
           const SizedBox(height: 6),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            chip('Any', f.radioId == null, () => update(clearRadio: true)),
-            for (final r in rigs)
-              chip(r.name, f.radioId == r.id, () => update(radioId: r.id)),
-          ]),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final r in rigs)
+                chip(
+                  label: r.name,
+                  pinned: pinnedRadioId == r.id,
+                  previewed: hoverRadioId == r.id,
+                  onTap: () => emit(
+                    pinnedRadio: r.id,
+                    clearPinnedRadio: pinnedRadioId == r.id,
+                    clearHoverRadio: true,
+                  ),
+                  onEnter: () => emit(hoverRadio: r.id),
+                  onExit: () => emit(clearHoverRadio: true),
+                ),
+            ],
+          ),
         ],
         if (antennas.isNotEmpty) ...[
           const SizedBox(height: 10),
           Text('QSOs — ANTENNA', style: t.labelSmall),
           const SizedBox(height: 6),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            chip('Any', f.antennaId == null, () => update(clearAntenna: true)),
-            for (final a in antennas)
-              chip(a.name, f.antennaId == a.id, () => update(antennaId: a.id)),
-          ]),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final a in antennas)
+                chip(
+                  label: a.name,
+                  pinned: pinnedAntennaId == a.id,
+                  previewed: hoverAntennaId == a.id,
+                  onTap: () => emit(
+                    pinnedAntenna: a.id,
+                    clearPinnedAntenna: pinnedAntennaId == a.id,
+                    clearHoverAntenna: true,
+                  ),
+                  onEnter: () => emit(hoverAntenna: a.id),
+                  onExit: () => emit(clearHoverAntenna: true),
+                ),
+            ],
+          ),
+        ],
+        if (pinnedRadioId != null || pinnedAntennaId != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Pinned selections reset when Filters closes.',
+            style: t.labelSmall?.copyWith(color: c.accent),
+          ),
         ],
       ],
     );
@@ -1357,6 +1862,7 @@ class _RetroOverlayPainter extends CustomPainter {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), scan);
     }
   }
+
   @override
   bool shouldRepaint(covariant _RetroOverlayPainter old) => old.color != color;
 }
@@ -1367,7 +1873,7 @@ class _RetroOverlayPainter extends CustomPainter {
 String _formatAge(Duration d) {
   if (d.inSeconds < 60) return '${d.inSeconds}s ago';
   if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours   < 24) return '${d.inHours}h ${d.inMinutes % 60}m ago';
+  if (d.inHours < 24) return '${d.inHours}h ${d.inMinutes % 60}m ago';
   return '${d.inDays}d ${d.inHours % 24}h ago';
 }
 
@@ -1376,7 +1882,12 @@ class _PskSpotMarker extends StatelessWidget {
   final Color color;
   final double? distanceKm;
   final DistanceUnit unit;
-  const _PskSpotMarker({required this.spot, required this.color, this.distanceKm, required this.unit});
+  const _PskSpotMarker({
+    required this.spot,
+    required this.color,
+    this.distanceKm,
+    required this.unit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1387,7 +1898,9 @@ class _PskSpotMarker extends StatelessWidget {
     final ageStr = _formatAge(age);
     final tip = StringBuffer()
       ..write('[PSK REPORTER]\n')
-      ..write(spot.direction == PskDirection.sent ? 'HEARD ME:  ' : 'I HEARD:  ')
+      ..write(
+        spot.direction == PskDirection.sent ? 'HEARD ME:  ' : 'I HEARD:  ',
+      )
       ..write(spot.otherCall)
       ..write('  ·  ')
       ..write(spot.otherGrid)
@@ -1415,11 +1928,17 @@ class _PskSpotMarker extends StatelessWidget {
         child: Transform.rotate(
           angle: 0.785398, // 45°
           child: Container(
-            width: 8, height: 8,
+            width: 8,
+            height: 8,
             decoration: BoxDecoration(
               color: color,
-              border: Border.all(color: Colors.white.withOpacity(0.9), width: 1),
-              boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 4)],
+              border: Border.all(
+                color: Colors.white.withOpacity(0.9),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(color: color.withOpacity(0.5), blurRadius: 4),
+              ],
             ),
           ),
         ),
@@ -1471,36 +1990,59 @@ class _DecodeMarker extends StatelessWidget {
         ..write('${unit.from(distanceKm!).toStringAsFixed(0)} ${unit.label}');
     }
     final dot = Container(
-      width: 10, height: 10,
+      width: 10,
+      height: 10,
       decoration: BoxDecoration(
         color: color.withOpacity(alpha),
         shape: BoxShape.circle,
         border: gridWasHinted
             ? null
-            : Border.all(color: Colors.white.withOpacity(0.9 * alpha), width: 1.4),
-        boxShadow: [BoxShadow(color: color.withOpacity(0.6 * alpha), blurRadius: 8, spreadRadius: 2)],
+            : Border.all(
+                color: Colors.white.withOpacity(0.9 * alpha),
+                width: 1.4,
+              ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.6 * alpha),
+            blurRadius: 8,
+            spreadRadius: 2,
+          ),
+        ],
       ),
     );
     return Tooltip(
       message: tooltip.toString(),
       waitDuration: const Duration(milliseconds: 250),
       child: isNewCq
-          ? Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                decoration: BoxDecoration(
-                  color: c.success.withOpacity(0.90 * alpha),
-                  border: Border.all(color: Colors.white.withOpacity(0.9 * alpha), width: 0.8),
-                ),
-                child: Text('NEW CQ',
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: c.success.withOpacity(0.90 * alpha),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.9 * alpha),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Text(
+                    'NEW CQ',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900,
-                          letterSpacing: 0.6,
-                        )),
-              ),
-              const SizedBox(height: 3),
-              dot,
-            ])
+                      color: Colors.black,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                dot,
+              ],
+            )
           : Center(child: dot),
     );
   }
