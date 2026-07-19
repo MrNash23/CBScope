@@ -122,28 +122,39 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
     final projectedSamples = mercatorSamples
         .map((sample) => _ProjectedSample(project(sample.point), sample.report))
         .toList();
-    final rawHull = _coverageSeedHull(
-        projectedSamples.map((sample) => sample.point).toList());
+    final samplePoints =
+        projectedSamples.map((sample) => sample.point).toList();
 
-    // Expand before smoothing because Chaikin/Bézier-style corner cutting
-    // otherwise pulls the path inside the outermost station markers.
-    // Increase the buffer until every sample is inside the smooth envelope.
-    List<Offset> projectedHull = rawHull;
-    for (final buffer in <double>[36, 52, 72, 92]) {
-      final candidate = _smoothClosed(_expandHull(rawHull, buffer), passes: 3);
-      projectedHull = candidate;
-      if (projectedSamples
-          .every((sample) => _insideOrNear(sample.point, candidate))) {
-        break;
-      }
+    // Build the hull from a safety disc around every station. This is a
+    // Minkowski-style buffer and, unlike radial expansion from a centroid,
+    // guarantees that every contributing marker remains well inside even for
+    // long, narrow or strongly asymmetric propagation footprints.
+    const stationSafetyRadius = 34.0;
+    final bufferedHull = _bufferedPointHull(
+      samplePoints,
+      stationSafetyRadius,
+    );
+    var projectedHull = _smoothClosed(bufferedHull, passes: 3);
+    if (!samplePoints.every(
+      (point) => _insideWithClearance(
+        point,
+        projectedHull,
+        stationSafetyRadius * 0.35,
+      ),
+    )) {
+      // Corner smoothing is intentionally allowed only when it preserves the
+      // safety margin. The buffered hull is the guaranteed fallback.
+      projectedHull = bufferedHull;
     }
     final pixels = Uint8List(width * height * 4);
-    const edgeFeatherPx = 18.0;
+    const edgeFeatherPx = 26.0;
 
     for (var y = 0; y < height; y++) {
       for (var x = 0; x < width; x++) {
         final pixel = Offset(x + 0.5, y + 0.5);
-        if (!_insidePolygon(pixel, projectedHull)) continue;
+        final inside = _insidePolygon(pixel, projectedHull);
+        final edgeDistance = _distanceToPolygonEdge(pixel, projectedHull);
+        if (!inside && edgeDistance > edgeFeatherPx) continue;
 
         var weightedReport = 0.0;
         var totalWeight = 0.0;
@@ -168,12 +179,17 @@ class _HeatmapOverlayState extends State<HeatmapOverlay> {
           0.35,
           1.0,
         );
-        final edgeDistance = _distanceToPolygonEdge(pixel, projectedHull);
-        final edgeFade = _smoothStep(
-          0,
-          edgeFeatherPx,
-          edgeDistance,
-        );
+        // Keep the measured area solid up to the boundary and render a real
+        // outer feather beyond it. Previously the fade happened only inside,
+        // which looked like a hard cut-out rather than a blurred edge.
+        final edgeFade = inside
+            ? 1.0
+            : 1 -
+                _smoothStep(
+                  0,
+                  edgeFeatherPx,
+                  edgeDistance,
+                );
         final argb = color.toARGB32();
         final offset = (y * width + x) * 4;
         pixels[offset] = (argb >> 16) & 0xff;
@@ -331,33 +347,17 @@ List<Offset> _convexHull(List<Offset> points) {
 /// Supplies a real area even when an equipment combination has only one or
 /// two QSOs. Multiple tiny circles are hulled into either a round island or a
 /// capsule, while 3+ locations use their actual outer hull.
-List<Offset> _coverageSeedHull(List<Offset> points) {
-  if (points.length >= 3) return _convexHull(points);
-  const radius = 20.0;
+List<Offset> _bufferedPointHull(List<Offset> points, double radius) {
   final support = <Offset>[];
   for (final point in points) {
-    for (var step = 0; step < 16; step++) {
-      final angle = step / 16 * math.pi * 2;
+    for (var step = 0; step < 24; step++) {
+      final angle = step / 24 * math.pi * 2;
       support.add(
         point + Offset(math.cos(angle), math.sin(angle)) * radius,
       );
     }
   }
   return _convexHull(support);
-}
-
-List<Offset> _expandHull(List<Offset> hull, double pixels) {
-  final centroid = hull.fold<Offset>(
-        Offset.zero,
-        (sum, point) => sum + point,
-      ) /
-      hull.length.toDouble();
-  return hull.map((point) {
-    final direction = point - centroid;
-    final length = direction.distance;
-    if (length < 1e-6) return point;
-    return point + direction / length * pixels;
-  }).toList();
 }
 
 /// Chaikin corner cutting is equivalent to chaining quadratic Bézier segments
@@ -378,19 +378,13 @@ List<Offset> _smoothClosed(List<Offset> polygon, {int passes = 2}) {
   return result;
 }
 
-bool _insideOrNear(Offset point, List<Offset> polygon) {
-  if (_insidePolygon(point, polygon)) return true;
-  for (var i = 0; i < polygon.length; i++) {
-    if (_distanceToSegment(
-          point,
-          polygon[i],
-          polygon[(i + 1) % polygon.length],
-        ) <=
-        3) {
-      return true;
-    }
-  }
-  return false;
+bool _insideWithClearance(
+  Offset point,
+  List<Offset> polygon,
+  double clearance,
+) {
+  return _insidePolygon(point, polygon) &&
+      _distanceToPolygonEdge(point, polygon) >= clearance;
 }
 
 double _distanceToSegment(Offset point, Offset a, Offset b) {
