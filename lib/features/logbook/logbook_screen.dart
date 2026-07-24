@@ -227,6 +227,7 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
               _h('Freq', 90),
               _h('Comment', 260),
               const Expanded(child: SizedBox()),
+              const SizedBox(width: 36),
             ],
           ),
         ),
@@ -252,6 +253,18 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
                     _v(q.gridsquare ?? '-', 90, mono: true),
                     _v(q.freqMhz?.toStringAsFixed(3) ?? '-', 90, mono: true),
                     _v(q.comment ?? '', 260),
+                    const Expanded(child: SizedBox()),
+                    Tooltip(
+                      message: 'Delete this QSO',
+                      child: IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 16),
+                        color: c.subtle,
+                        splashRadius: 18,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        padding: EdgeInsets.zero,
+                        onPressed: () => _confirmDelete(q),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -261,6 +274,35 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _confirmDelete(Qso q) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final df = DateFormat('yyyy-MM-dd HH:mm \'UTC\'');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete QSO?'),
+        content: Text(
+          '${q.call} · ${q.band} · ${q.mode}\n${df.format(q.timeOn.toUtc())}\n\nThis cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ref.read(qsoRepoProvider).deleteQso(q.id);
+    messenger.showSnackBar(SnackBar(
+      content: Text('Deleted QSO with ${q.call}'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 2),
+    ));
   }
 
   Widget _h(String s, double w) => SizedBox(

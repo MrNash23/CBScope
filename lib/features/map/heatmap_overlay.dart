@@ -324,6 +324,10 @@ double _cloudInfluence(double distance, double sigma) {
   return 0.72 * math.exp(-(distance * distance) / (2 * sigmaSquared));
 }
 
+/// Public alias so map overlays (e.g. the legend) can render the same
+/// gradient used by the heatmap raster.
+Color heatmapReportColor(double report) => _reportColor(report);
+
 Color _reportColor(double report) {
   final t = ((report.clamp(-30, 10) + 30) / 40).toDouble();
   if (t < 0.33) {

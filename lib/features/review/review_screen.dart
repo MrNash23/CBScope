@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/util/maidenhead.dart';
 import '../../core/widgets/app_card.dart';
 import '../../data/db/database.dart';
 import '../../providers/providers.dart';
@@ -76,14 +78,59 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
   late int? _rigId     = widget.qso.radioId;
   late int  _rating    = widget.qso.rating;
   late final _notesCtrl = TextEditingController(text: widget.qso.personalNotes ?? '');
+  late final _gridCtrl  = TextEditingController(text: widget.qso.gridsquare ?? '');
+  bool _gridTouched = false;
+
+  @override
+  void didUpdateWidget(covariant _ReviewCard old) {
+    super.didUpdateWidget(old);
+    // If PSK Reporter back-fills a grid while this card is open, mirror the
+    // new value into the input — but only if the user hasn't started typing
+    // (otherwise their edit would be blown away).
+    final incoming = widget.qso.gridsquare ?? '';
+    if (!_gridTouched && incoming != _gridCtrl.text) {
+      _gridCtrl.text = incoming;
+    }
+  }
 
   @override
   void dispose() {
     _notesCtrl.dispose();
+    _gridCtrl.dispose();
     super.dispose();
   }
 
+  /// null → nothing to write; empty string → user typed garbage; non-empty →
+  /// validated and normalised locator ready to persist.
+  String? _validatedGrid() {
+    final raw = _gridCtrl.text.trim();
+    if (raw.isEmpty) return null;
+    final ll = gridToLatLng(raw);
+    if (ll == null) return '';
+    return raw.toUpperCase();
+  }
+
   Future<void> _save({required bool markReviewed}) async {
+    // Capture messenger before await — the card may unmount when the
+    // needsReview stream refreshes after markReviewed, and using
+    // `context` afterwards would drop the snackbar silently.
+    final messenger = ScaffoldMessenger.of(context);
+
+    String? gridToWrite;
+    final v = _validatedGrid();
+    if (v == '') {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Invalid grid locator — expected e.g. JO62QN'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+    // Only write the grid if the user actually touched the field, or if the
+    // QSO had no grid to begin with (in which case an empty write is a no-op
+    // via null). This keeps existing grids untouched on Save draft.
+    if (_gridTouched) gridToWrite = v;
+
     final repo = ref.read(qsoRepoProvider);
     await repo.updateEnrichment(
       widget.qso.id,
@@ -91,18 +138,18 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
       radioId: _rigId,
       personalNotes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
       rating: _rating,
+      gridsquare: gridToWrite,
       markReviewed: markReviewed,
       clearAntenna: _antennaId == null,
       clearRadio:   _rigId == null,
     );
-    if (!mounted) return;
-    if (markReviewed) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Marked ${widget.qso.call} reviewed'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 1),
-      ));
-    }
+    messenger.showSnackBar(SnackBar(
+      content: Text(markReviewed
+          ? 'Marked ${widget.qso.call} reviewed'
+          : 'Draft saved for ${widget.qso.call}'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 1),
+    ));
   }
 
   @override
@@ -135,7 +182,9 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
           Wrap(
             spacing: 12, runSpacing: 4,
             children: [
-              if (q.gridsquare != null) _kv(context, 'Grid', q.gridsquare!),
+              // Grid is shown as an editable field below (always visible so
+              // the user can correct or fill in a locator), so we skip the
+              // read-only chip here.
               _kv(context, 'RST S/R', '${q.rstSent ?? '-'} / ${q.rstRcvd ?? '-'}'),
               if (q.name != null && q.name!.isNotEmpty) _kv(context, 'Name', q.name!),
               if (q.country != null && q.country!.isNotEmpty) _kv(context, 'Country', q.country!),
@@ -176,6 +225,26 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
                 onChanged: (v) => setState(() => _rating = v),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _gridCtrl,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(8),
+              FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+            ],
+            onChanged: (_) => setState(() => _gridTouched = true),
+            decoration: InputDecoration(
+              hintText: (q.gridsquare == null || q.gridsquare!.isEmpty)
+                  ? 'Grid locator (e.g. JO62QN) — will auto-fill via PSK Reporter'
+                  : 'Grid locator',
+              prefixIcon: const Icon(Icons.public, size: 14),
+              errorText: _gridCtrl.text.trim().isNotEmpty &&
+                      gridToLatLng(_gridCtrl.text.trim()) == null
+                  ? 'Invalid Maidenhead grid'
+                  : null,
+            ),
           ),
           const SizedBox(height: 10),
           TextField(

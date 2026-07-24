@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_card.dart';
 import '../../core/widgets/propagation_card.dart';
-import '../../data/db/qso_repository.dart';
 import '../../providers/providers.dart';
 import 'distance_polar_chart.dart';
 
@@ -17,7 +16,6 @@ class StatsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final kpis      = ref.watch(kpisProvider);
     final perDay    = ref.watch(qsoPerDayProvider);
-    final freqHist  = ref.watch(freqHistogramProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
@@ -50,17 +48,6 @@ class StatsScreen extends ConsumerWidget {
               height: 260,
               child: perDay.when(
                 data: (m) => _DayBarChart(m: m),
-                loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-                error: (e, _) => Text('$e'),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          AppCard(
-            child: SizedBox(
-              height: 260,
-              child: freqHist.when(
-                data: (m) => _FreqHistogram(m: m),
                 loading: () => const Center(child: CircularProgressIndicator.adaptive()),
                 error: (e, _) => Text('$e'),
               ),
@@ -248,76 +235,6 @@ class _DayBarChart extends StatelessWidget {
                     color: c.accent,
                     width: barWidth,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
-                  ),
-                ]),
-            ],
-          )),
-        ),
-      ],
-    );
-  }
-}
-
-class _FreqHistogram extends StatelessWidget {
-  /// keys are bin centers in kHz.
-  final Map<int, int> m;
-  const _FreqHistogram({required this.m});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final t = Theme.of(context).textTheme;
-    if (m.isEmpty) {
-      return Center(child: Text('No frequency data yet', style: t.bodySmall));
-    }
-    final entries = m.entries.toList();
-    final maxRaw = entries.map((e) => e.value).fold<int>(0, (a, b) => a > b ? a : b);
-    final maxY = (maxRaw == 0 ? 1 : maxRaw * 1.15).toDouble();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text('Frequency usage', style: t.titleSmall),
-            const SizedBox(width: 8),
-            Text('(5 kHz bins)', style: t.bodySmall),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: BarChart(BarChartData(
-            alignment: BarChartAlignment.spaceBetween,
-            maxY: maxY,
-            gridData: FlGridData(show: true, drawVerticalLine: false,
-              horizontalInterval: (maxY / 4).clamp(1.0, 1e6).toDouble(),
-              getDrawingHorizontalLine: (v) => FlLine(color: c.border, strokeWidth: 1)),
-            borderData: FlBorderData(show: false),
-            titlesData: FlTitlesData(
-              rightTitles: const AxisTitles(),
-              topTitles:   const AxisTitles(),
-              leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 32,
-                interval: (maxY / 4).clamp(1.0, 1e6).toDouble(),
-                getTitlesWidget: (v, meta) => SideTitleWidget(axisSide: meta.axisSide,
-                  child: Text(v.toInt().toString(), style: t.labelSmall)))),
-              bottomTitles: AxisTitles(sideTitles: SideTitles(
-                showTitles: true, reservedSize: 28,
-                interval: (entries.length / 6).clamp(1.0, 1e6).toDouble(),
-                getTitlesWidget: (v, meta) {
-                  final i = v.toInt();
-                  if (i < 0 || i >= entries.length) return const SizedBox.shrink();
-                  final khz = entries[i].key;
-                  return SideTitleWidget(axisSide: meta.axisSide,
-                    child: Text((khz / 1000).toStringAsFixed(3), style: t.labelSmall));
-                })),
-            ),
-            barGroups: [
-              for (int i = 0; i < entries.length; i++)
-                BarChartGroupData(x: i, barRods: [
-                  BarChartRodData(
-                    toY: entries[i].value.toDouble(),
-                    color: c.warning,
-                    width: 8,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(2)),
                   ),
                 ]),
             ],

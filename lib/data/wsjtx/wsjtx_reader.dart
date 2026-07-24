@@ -49,6 +49,14 @@ class WsjtxReader {
         final watchdog = r.readBool();
         final subMode = r.readUtf8();
         final fast = r.readBool();
+        // Schema-3 trailer (all optional): specialOpMode (u8), freqTolerance
+        // (u32), t/rPeriod (u32), configName (utf8), txMessage (utf8). Read
+        // each only if the packet is long enough — WSJT-CB packets vary.
+        if (r.canRead(1)) r.readUint8();          // specialOpMode
+        if (r.canRead(4)) r.readUint32();         // freqTolerance
+        if (r.canRead(4)) r.readUint32();         // trPeriod
+        if (r.canRead(4)) r.readUtf8();           // configName
+        final txMessage = r.canRead(4) ? r.readUtf8() : null;
         return WsjtxStatus(
           id: id,
           dialFrequency: dial,
@@ -67,6 +75,7 @@ class WsjtxReader {
           txWatchdog: watchdog,
           subMode: subMode,
           fastMode: fast,
+          txMessage: txMessage,
         );
       case 2:
         return WsjtxDecode(
@@ -129,6 +138,12 @@ class WsjtxReader {
   }
 
   bool canRead(int n) => remaining >= n;
+
+  int readUint8() {
+    final v = _data.getUint8(_pos);
+    _pos += 1;
+    return v;
+  }
 
   int readUint32() {
     final v = _data.getUint32(_pos, Endian.big);

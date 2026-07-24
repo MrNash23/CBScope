@@ -97,6 +97,10 @@ class CallsignResolver extends ChangeNotifier {
           if (rep != null) {
             _hot[call] = rep.grid;
             await repo.upsertCallsignGrid(call, rep.grid, 'pskreporter');
+            // Back-fill the locator on any QSO already imported without one —
+            // typical for WSJT-CB decodes that arrive faster than the async
+            // PSK lookup can complete.
+            await repo.backfillMissingGrid(call: call, grid: rep.grid);
             notifyListeners();
           }
         } on PskReporterRateLimited {

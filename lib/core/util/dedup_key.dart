@@ -31,6 +31,9 @@ String freqToBand(int hz) {
   if (mhz >= 18.068 && mhz < 18.168) return '17m';
   if (mhz >= 21.0 && mhz < 21.45) return '15m';
   if (mhz >= 24.89 && mhz < 24.99) return '12m';
+  // 11 m CB / freeband — WSJT-CB emits `<band:3>11m` in ADIF, so the UDP path
+  // must produce the same label or dedup misses and the row gets logged twice.
+  if (mhz >= 26.9 && mhz < 27.5) return '11m';
   if (mhz >= 28.0 && mhz < 29.7) return '10m';
   if (mhz >= 50.0 && mhz < 54.0) return '6m';
   if (mhz >= 70.0 && mhz < 71.0) return '4m';

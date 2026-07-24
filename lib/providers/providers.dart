@@ -26,8 +26,13 @@ final dbProvider = Provider<AppDatabase>((ref) {
   return db;
 });
 
-final qsoRepoProvider =
-    Provider<QsoRepository>((ref) => QsoRepository(ref.watch(dbProvider)));
+final qsoRepoProvider = Provider<QsoRepository>((ref) {
+  final repo = QsoRepository(ref.watch(dbProvider));
+  // One-shot cleanup for legacy CB-band dupes (see repairCbBandDuplicates).
+  // Fire-and-forget — the sync-only Provider must return the repo now.
+  unawaited(repo.repairCbBandDuplicates());
+  return repo;
+});
 
 final prefsProvider =
     FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
@@ -808,13 +813,6 @@ final bandCountsProvider = FutureProvider<Map<String, int>>((ref) async {
 final modeCountsProvider = FutureProvider<Map<String, int>>((ref) async {
   ref.watch(logbookProvider);
   return ref.watch(qsoRepoProvider).countsBy('mode');
-});
-
-/// Freq histogram (kHz bins) — CB-optimized alternative to the band donut,
-/// since on 11m most activity happens within a handful of kHz of 27.245.
-final freqHistogramProvider = FutureProvider<Map<int, int>>((ref) async {
-  ref.watch(logbookProvider);
-  return ref.watch(qsoRepoProvider).freqHistogramKhz(binKhz: 5);
 });
 
 /// ---------------- ADIF drag-drop import ----------------

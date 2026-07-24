@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -56,6 +57,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   bool _showMe = true;
   bool _showPskSpots = true;
   bool _showGreyline = false;
+  bool _showRunningQso = true;
   bool _filtersOpen = false;
   int? _pinnedRadioId;
   int? _pinnedAntennaId;
@@ -99,6 +101,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final qsos = ref.watch(logbookProvider).valueOrNull ?? const [];
     final allQsos = ref.watch(allQsosProvider).valueOrNull ?? const <Qso>[];
     final decodes = ref.watch(liveDecodesProvider);
+    final wsjtxStatus = ref.watch(wsjtxStatusProvider);
     final mySettings = ref.watch(settingsProvider);
     final myLatLng = gridToLatLng(mySettings.myGrid);
     final unit = mySettings.distanceUnit;
@@ -248,6 +251,119 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       }
     }
 
+    // Running-QSO layer: WSJT-CB leaves `dxCall` populated in Status long
+    // after a QSO ends (sticky DX Call text field), so we can't use that
+    // alone. Instead we walk two independent evidence trails:
+    //
+    //  ENGAGED   → we've received a decode from `dxCall` addressed to *us*
+    //              (they replied — the QSO is live). Rendered bright/bold.
+    //  CALLING   → we've transmitted (offAir decode) addressed to `dxCall`,
+    //              but haven't heard back yet. Rendered softer so the user
+    //              still sees the outbound attempt from the moment they hit
+    //              Enable Tx.
+    //
+    // Both cases are hidden once a QSO with that call has been logged in
+    // the last 5 minutes (Log button or auto-log after RR73).
+    LatLng? runningLatLng;
+    String? runningCall;
+    String? runningGrid;
+    bool runningTx = false;
+    bool hasRunning = false;
+    bool isEngaged = false; // false → "calling", true → full "working"
+    if (!_replayEnabled &&
+        wsjtxStatus != null &&
+        wsjtxStatus.dxCall != null &&
+        wsjtxStatus.dxCall!.trim().isNotEmpty) {
+      final call = wsjtxStatus.dxCall!.trim().toUpperCase();
+      final decodeCutoff = now.subtract(const Duration(seconds: 120));
+      final myCall = mySettings.myCall?.trim().toUpperCase();
+      // WSJT-CB wraps hash-compressed callsigns in `<...>` (e.g.
+      // `<19XX999> 14XX000`); strip them so token comparisons match the
+      // plain-string dxCall / myCall values.
+      String firstToken(String msg) {
+        final tokens = msg.trim().split(RegExp(r'\s+'));
+        if (tokens.isEmpty) return '';
+        return tokens.first.replaceAll(RegExp(r'^<|>$'), '').toUpperCase();
+      }
+
+      // Engaged: DX sent a message addressed to *us*. CB decodes often
+      // arrive abbreviated as `MYCALL -08` / `MYCALL RR73` — the sender
+      // isn't in the string, so we trust `wsjtxStatus.dxCall` (which is
+      // authoritative for who we're working) rather than parsing it out.
+      final engagedByReply = myCall != null && myCall.isNotEmpty &&
+          decodes.any((d) {
+            if (!d.receivedAt.isAfter(decodeCutoff)) return false;
+            final msg = d.decode.message.trim().toUpperCase();
+            if (msg.isEmpty || msg.startsWith('CQ ')) return false;
+            return firstToken(msg) == myCall;
+          });
+      // Calling: our own transmission is directed at `dxCall`. Primary
+      // signal is the schema-3 `txMessage` from Status; fallback to offAir
+      // Decode echoes if Status didn't carry it.
+      bool callingTarget = false;
+      final txMsg = wsjtxStatus.txMessage?.trim().toUpperCase();
+      if (txMsg != null && txMsg.isNotEmpty) {
+        callingTarget = firstToken(txMsg) == call;
+      } else {
+        final selfCutoff = now.subtract(const Duration(seconds: 60));
+        callingTarget = decodes.any((d) {
+          if (!d.receivedAt.isAfter(selfCutoff)) return false;
+          if (!d.decode.offAir) return false;
+          return firstToken(d.decode.message) == call;
+        });
+      }
+      final logCutoff = now.toUtc().subtract(const Duration(minutes: 5));
+      final alreadyLogged = qsos.any((q) =>
+          q.call.toUpperCase() == call && q.timeOn.isAfter(logCutoff));
+      if ((engagedByReply || callingTarget) && !alreadyLogged) {
+        hasRunning = true;
+        isEngaged = engagedByReply;
+        runningCall = call;
+        runningTx = wsjtxStatus.transmitting;
+        final rawGrid = (wsjtxStatus.dxGrid != null &&
+                wsjtxStatus.dxGrid!.trim().length >= 4)
+            ? wsjtxStatus.dxGrid!.trim().toUpperCase()
+            : resolver.gridFor(call);
+        if (rawGrid != null) {
+          runningGrid = rawGrid;
+          runningLatLng = gridToLatLng(rawGrid);
+        }
+      }
+    }
+    final showRunningLayer = _showRunningQso && hasRunning;
+    const runningColor = Color(0xFFFF7A1A); // bright orange — deliberately
+    // distinct from qso/decode/psk palette so the eye finds it instantly.
+
+    // "Calling CQ" detection for the QTH marker.
+    // Primary signal: WSJT-X schema-3 Status carries the exact TX message
+    // string — we can just look at whether it starts with "CQ ".
+    // Fallback (older schemas / truncated packets): scan recent Decode
+    // messages with offAir=true. If neither exists but `transmitting=true`
+    // and `dxCall` is empty (WSJT-X clears the DX Call field when the CQ
+    // button is used), it's very likely a CQ.
+    bool callingCq = false;
+    if (!_replayEnabled && wsjtxStatus != null && wsjtxStatus.transmitting) {
+      final txMsg = wsjtxStatus.txMessage?.trim().toUpperCase();
+      if (txMsg != null && txMsg.isNotEmpty) {
+        callingCq = txMsg.startsWith('CQ ');
+      } else {
+        bool foundSelfDecode = false;
+        final selfCutoff = now.subtract(const Duration(seconds: 45));
+        for (final d in decodes) {
+          if (d.receivedAt.isBefore(selfCutoff)) break; // newest-first
+          if (!d.decode.offAir) continue;
+          foundSelfDecode = true;
+          callingCq =
+              d.decode.message.trim().toUpperCase().startsWith('CQ ');
+          break;
+        }
+        if (!foundSelfDecode) {
+          final dx = wsjtxStatus.dxCall?.trim() ?? '';
+          callingCq = dx.isEmpty;
+        }
+      }
+    }
+
     return Stack(
       children: [
         FlutterMap(
@@ -265,10 +381,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             if (_showGreyline) _GreylineLayer(),
             if (decodeLines.isNotEmpty || pskLines.isNotEmpty)
               PolylineLayer(polylines: [...decodeLines, ...pskLines]),
+            if (showRunningLayer && runningLatLng != null && myLatLng != null)
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: [myLatLng, runningLatLng],
+                    color: runningColor.withOpacity(isEngaged ? 0.75 : 0.35),
+                    strokeWidth: isEngaged ? 2.2 : 1.4,
+                  ),
+                ],
+              ),
             // Animated dots flowing along each PSK great-circle line.
             if (_showPskSpots && myLatLng != null && pskMarkers.isNotEmpty)
               MarkerLayer(
                 markers: _flowingPskDots(myLatLng, pskSpots, pskColor),
+              ),
+            // Running-QSO flowing dots — direction reflects TX/RX so the user
+            // can see whether *they* are transmitting or the DX is replying.
+            if (showRunningLayer && runningLatLng != null && myLatLng != null)
+              MarkerLayer(
+                markers: _flowingRunningDots(
+                  myLatLng,
+                  runningLatLng,
+                  runningColor,
+                  transmitting: runningTx,
+                ),
               ),
             if (previewRadioId != null || previewAntennaId != null)
               HeatmapOverlay(
@@ -278,29 +415,37 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             MarkerLayer(
               markers: [...qsoMarkers, ...pskMarkers, ...decodeMarkers],
             ),
+            if (showRunningLayer && runningLatLng != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: runningLatLng,
+                    width: 140,
+                    height: 60,
+                    child: _RunningQsoMarker(
+                      call: runningCall!,
+                      grid: runningGrid!,
+                      transmitting: runningTx,
+                      color: runningColor,
+                      engaged: isEngaged,
+                    ),
+                  ),
+                ],
+              ),
             if (_showMe && myLatLng != null)
               MarkerLayer(
                 markers: [
                   Marker(
                     point: myLatLng,
-                    width: 24,
-                    height: 24,
-                    child: Tooltip(
-                      message:
-                          'You  ·  ${mySettings.myCall ?? ''}  ·  ${mySettings.myGrid}',
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: meColor,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: meColor.withOpacity(0.4),
-                              blurRadius: 6,
-                            ),
-                          ],
-                        ),
-                      ),
+                    // Wide enough to fit the "CQ" badge + halo when active,
+                    // small when idle — flutter_map centres on the point.
+                    width: callingCq ? 70 : 24,
+                    height: callingCq ? 56 : 24,
+                    child: _MeMarker(
+                      color: meColor,
+                      call: mySettings.myCall,
+                      grid: mySettings.myGrid,
+                      callingCq: callingCq,
                     ),
                   ),
                 ],
@@ -343,6 +488,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     mySettings.pskSpotDirection != PskSpotDirection.off,
                 onTap: () => setState(() => _showPskSpots = !_showPskSpots),
               ),
+              if (hasRunning && runningCall != null) ...[
+                const SizedBox(width: 8),
+                _pill(
+                  icon: runningTx ? Icons.podcasts : Icons.headset_mic,
+                  color: runningColor,
+                  label: isEngaged
+                      ? (runningTx
+                          ? 'TX → $runningCall'
+                          : 'Working $runningCall')
+                      : 'Calling $runningCall',
+                  active: _showRunningQso,
+                  onTap: () =>
+                      setState(() => _showRunningQso = !_showRunningQso),
+                ),
+              ],
               const SizedBox(width: 8),
               _pill(
                 icon: Icons.tune,
@@ -399,6 +559,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             bottom: 16,
             width: 360,
             child: const PropagationCard(compact: true),
+          ),
+
+        // Heatmap legend: only visible when a radio/antenna preview is
+        // driving the heatmap raster. Right side above the filter panel gap.
+        if (previewRadioId != null || previewAntennaId != null)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: _HeatmapLegend(direction: _heatmapDirection),
           ),
 
         // Bottom: time-replay scrubber
@@ -465,6 +634,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               showMe: _showMe,
               showPskSpots: _showPskSpots,
               showGreyline: _showGreyline,
+              showRunningQso: _showRunningQso,
               ageFilter: _ageFilter,
               ageCustomMinutes: _ageCustomMinutes,
               minSnr: _minSnr,
@@ -490,6 +660,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   _showMe = next.showMe;
                   _showPskSpots = next.showPskSpots;
                   _showGreyline = next.showGreyline;
+                  _showRunningQso = next.showRunningQso;
                   _ageFilter = next.ageFilter;
                   _ageCustomMinutes = next.ageCustomMinutes;
                   _minSnr = next.minSnr;
@@ -533,9 +704,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       for (int i = 0; i < 3; i++) {
         double frac = ((i / 3) + t) % 1.0;
         if (!forward) frac = 1.0 - frac; // reverse direction
-        // Simple linear interp in lat/lon — good enough at CB distances and
-        // avoids the cost of full spherical interpolation on every frame.
-        final lat = me.latitude + (other.latitude - me.latitude) * frac;
+        // Interpolate in Web Mercator space so dots track the polyline that
+        // flutter_map draws as a straight line between the two projected
+        // endpoints. Longitude is linear in Mercator; latitude is not.
+        final y0 = math.log(math.tan(math.pi / 4 + me.latitude * math.pi / 360));
+        final y1 =
+            math.log(math.tan(math.pi / 4 + other.latitude * math.pi / 360));
+        final y = y0 + (y1 - y0) * frac;
+        final lat = (2 * math.atan(math.exp(y)) - math.pi / 2) * 180 / math.pi;
         final lon = me.longitude + (other.longitude - me.longitude) * frac;
         markers.add(
           Marker(
@@ -554,6 +730,47 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
         );
       }
+    }
+    return markers;
+  }
+
+  /// Animated dots showing the direction of an in-progress QSO — outbound
+  /// (me → DX) while transmitting, inbound (DX → me) while receiving. Uses
+  /// the same Mercator-space interpolation as `_flowingPskDots` so the dots
+  /// track the visual straight line.
+  List<Marker> _flowingRunningDots(
+    LatLng me,
+    LatLng other,
+    Color color, {
+    required bool transmitting,
+  }) {
+    final markers = <Marker>[];
+    // Faster than PSK dots (0.03/s) so the QSO reads as "live activity".
+    final t = (DateTime.now().millisecondsSinceEpoch % 1500) / 1500.0;
+    final y0 = math.log(math.tan(math.pi / 4 + me.latitude * math.pi / 360));
+    final y1 = math.log(math.tan(math.pi / 4 + other.latitude * math.pi / 360));
+    for (int i = 0; i < 4; i++) {
+      double frac = ((i / 4) + t) % 1.0;
+      if (!transmitting) frac = 1.0 - frac;
+      final y = y0 + (y1 - y0) * frac;
+      final lat = (2 * math.atan(math.exp(y)) - math.pi / 2) * 180 / math.pi;
+      final lon = me.longitude + (other.longitude - me.longitude) * frac;
+      markers.add(
+        Marker(
+          point: LatLng(lat, lon),
+          width: 8,
+          height: 8,
+          child: Container(
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: color.withOpacity(0.7), blurRadius: 6),
+              ],
+            ),
+          ),
+        ),
+      );
     }
     return markers;
   }
@@ -693,6 +910,17 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Widget _buildTileLayer(MapStyle style) {
+    // Buffer knobs shared by both tile layers. flutter_map's defaults
+    // (keepBuffer=2, panBuffer=1) leave visible gaps during a fast pinch or
+    // scroll-wheel zoom because it evicts the previous level's tiles before
+    // the new level finishes fetching. Bumping the buffers keeps a wider ring
+    // of tiles resident so the transition stays covered. `notVisibleRespectMargin`
+    // drops broken tiles once they're safely off-screen instead of
+    // re-requesting them every frame.
+    const keepBuffer = 6;
+    const panBuffer = 3;
+    const errorStrategy = EvictErrorTileStrategy.notVisibleRespectMargin;
+
     // CBScope Retro = Carto Dark Matter (dark gray tiles) tinted green via a
     // per-tile color filter that keeps roads/labels legible while giving the
     // whole map the retro terminal glow. Regular = OpenStreetMap standard.
@@ -703,6 +931,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         subdomains: const ['a', 'b', 'c', 'd'],
         userAgentPackageName: 'app.cbscope',
         tileProvider: NetworkTileProvider(),
+        keepBuffer: keepBuffer,
+        panBuffer: panBuffer,
+        evictErrorTileStrategy: errorStrategy,
+        maxNativeZoom: 19,
         tileBuilder: (context, tileWidget, tile) {
           // Blend the dark tile with cyan so the base map takes on the
           // Tron #00E5FF hue while retaining road/label structure.
@@ -725,6 +957,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'app.cbscope',
       tileProvider: NetworkTileProvider(),
+      keepBuffer: keepBuffer,
+      panBuffer: panBuffer,
+      evictErrorTileStrategy: errorStrategy,
+      maxNativeZoom: 19,
     );
   }
 
@@ -791,7 +1027,8 @@ class _FilterState {
       showLines,
       showMe,
       showPskSpots,
-      showGreyline;
+      showGreyline,
+      showRunningQso;
   final QsoAgeFilter ageFilter;
   final int ageCustomMinutes;
   final double minSnr;
@@ -802,6 +1039,7 @@ class _FilterState {
     required this.showMe,
     required this.showPskSpots,
     required this.showGreyline,
+    required this.showRunningQso,
     required this.ageFilter,
     required this.ageCustomMinutes,
     required this.minSnr,
@@ -828,7 +1066,8 @@ class _FilterPanel extends ConsumerWidget {
       showLines,
       showMe,
       showPskSpots,
-      showGreyline;
+      showGreyline,
+      showRunningQso;
   final QsoAgeFilter ageFilter;
   final int ageCustomMinutes;
   final double minSnr;
@@ -849,6 +1088,7 @@ class _FilterPanel extends ConsumerWidget {
     required this.showMe,
     required this.showPskSpots,
     required this.showGreyline,
+    required this.showRunningQso,
     required this.ageFilter,
     required this.ageCustomMinutes,
     required this.minSnr,
@@ -923,6 +1163,12 @@ class _FilterPanel extends ConsumerWidget {
                     'Live decodes',
                     showDecodes,
                     (v) => _emit(showDecodes: v),
+                  ),
+                  _switchRow(
+                    context,
+                    'Running QSO (WSJT-CB DX)',
+                    showRunningQso,
+                    (v) => _emit(showRunningQso: v),
                   ),
                   _switchRow(
                     context,
@@ -1127,6 +1373,7 @@ class _FilterPanel extends ConsumerWidget {
     bool? showMe,
     bool? showPskSpots,
     bool? showGreyline,
+    bool? showRunningQso,
     QsoAgeFilter? ageFilter,
     int? ageCustomMinutes,
     double? minSnr,
@@ -1139,6 +1386,7 @@ class _FilterPanel extends ConsumerWidget {
         showMe: showMe ?? this.showMe,
         showPskSpots: showPskSpots ?? this.showPskSpots,
         showGreyline: showGreyline ?? this.showGreyline,
+        showRunningQso: showRunningQso ?? this.showRunningQso,
         ageFilter: ageFilter ?? this.ageFilter,
         ageCustomMinutes: ageCustomMinutes ?? this.ageCustomMinutes,
         minSnr: minSnr ?? this.minSnr,
@@ -1990,6 +2238,258 @@ class _PskSpotMarker extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Compact legend for the equipment heatmap. Renders the same red→amber→
+/// green→cyan gradient the raster uses, with a few tick labels so the user
+/// can read a colour back into an approximate FT8 dB report.
+class _HeatmapLegend extends StatelessWidget {
+  final HeatmapSignalDirection direction;
+  const _HeatmapLegend({required this.direction});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    // Sample the gradient across the same [-30, +10] dB range the heatmap
+    // uses, so the bar's colours match the raster exactly.
+    const stops = 32;
+    final colors = <Color>[
+      for (var i = 0; i < stops; i++)
+        heatmapReportColor(-30 + (40 * i / (stops - 1))),
+    ];
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      color: c.card.withOpacity(0.92),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.gradient, size: 12, color: c.subtle),
+              const SizedBox(width: 6),
+              Text(
+                direction == HeatmapSignalDirection.send
+                    ? 'HEATMAP · signal RECEIVED by DX (dB)'
+                    : 'HEATMAP · signal SENT to us by DX (dB)',
+                style: t.labelSmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Container(
+            width: 220,
+            height: 10,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: colors),
+              border: Border.all(color: c.border, width: 0.6),
+            ),
+          ),
+          const SizedBox(height: 3),
+          SizedBox(
+            width: 220,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                for (final label in const ['−30', '−17', '−4', '+10'])
+                  Text(label,
+                      style: t.labelSmall
+                          ?.copyWith(fontFamily: 'Menlo', color: c.subtle)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// QTH marker for the operator. Idle: a small filled dot. Calling CQ: a
+/// pulsing halo + "CQ" badge, so a glance at the map shows you're on air.
+class _MeMarker extends StatelessWidget {
+  final Color color;
+  final String? call;
+  final String? grid;
+  final bool callingCq;
+  const _MeMarker({
+    required this.color,
+    required this.call,
+    required this.grid,
+    required this.callingCq,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final tooltip =
+        'You  ·  ${call ?? ''}  ·  ${grid ?? ''}${callingCq ? '\nCalling CQ' : ''}';
+    // 0..1 pulse driven by wallclock; parent's 200 ms tick rebuilds the map.
+    final phase = (DateTime.now().millisecondsSinceEpoch % 1400) / 1400.0;
+    final halo = 22.0 + 22.0 * phase;
+    final haloAlpha = (0.55 * (1 - phase)).clamp(0.0, 1.0);
+    final dot = DecoratedBox(
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(color: color.withOpacity(0.4), blurRadius: 6),
+        ],
+      ),
+    );
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 250),
+      child: !callingCq
+          ? SizedBox(width: 24, height: 24, child: dot)
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: color,
+                    border: Border.all(color: Colors.white, width: 1),
+                  ),
+                  child: Text(
+                    'CQ',
+                    style: t.labelSmall?.copyWith(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                SizedBox(
+                  width: 46,
+                  height: 30,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        width: halo,
+                        height: halo,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: color.withOpacity(haloAlpha),
+                            width: 1.6,
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 18, height: 18, child: dot),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Marker for an in-progress QSO reported via WSJT-CB's Status packet.
+/// Shows the DX callsign + grid with a pulsing halo; the halo phase relies
+/// on the map's 200 ms fade tick so no extra AnimationController is needed.
+class _RunningQsoMarker extends StatelessWidget {
+  final String call;
+  final String grid;
+  final bool transmitting;
+  final Color color;
+  final bool engaged;
+  const _RunningQsoMarker({
+    required this.call,
+    required this.grid,
+    required this.transmitting,
+    required this.color,
+    required this.engaged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    // 0..1 pulse driven by wallclock — parent's 200 ms tick rebuilds the map.
+    final phase =
+        (DateTime.now().millisecondsSinceEpoch % 1200) / 1200.0;
+    final halo = 6.0 + 10.0 * phase;
+    final baseHaloAlpha = engaged ? 0.55 : 0.28;
+    final haloAlpha = (baseHaloAlpha * (1 - phase)).clamp(0.0, 1.0);
+    // Softer badge + dot when we're still just calling and haven't been
+    // answered yet — draws the eye less than a confirmed engaged QSO.
+    final badgeAlpha = engaged ? 1.0 : 0.55;
+    final dotAlpha = engaged ? 1.0 : 0.7;
+    return Tooltip(
+      message: '$call · $grid\n'
+          '${engaged ? (transmitting ? 'Transmitting to' : 'Waiting for reply from') : 'Calling'} $call',
+      waitDuration: const Duration(milliseconds: 200),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withOpacity(badgeAlpha),
+              border: Border.all(
+                color: Colors.white.withOpacity(engaged ? 1.0 : 0.7),
+                width: 1,
+              ),
+            ),
+            child: Text(
+              engaged ? call : '→ $call',
+              style: t.labelSmall?.copyWith(
+                color: Colors.black,
+                fontWeight: engaged ? FontWeight.w800 : FontWeight.w600,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: halo,
+                  height: halo,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: color.withOpacity(haloAlpha),
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(dotAlpha),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withOpacity(engaged ? 1.0 : 0.7),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(engaged ? 0.7 : 0.35),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

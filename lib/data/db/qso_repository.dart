@@ -245,6 +245,50 @@ class QsoRepository {
         .getSingleOrNull();
   }
 
+  /// Fill in `gridsquare` on any existing QSO for [call] that was imported
+  /// without a locator. Called after an async PSK Reporter lookup succeeds,
+  /// so review cards get their grid populated once the network catches up.
+  /// Never overwrites a grid that's already set (user or ADIF wins).
+  Future<int> backfillMissingGrid({required String call, required String grid}) {
+    final g = grid.toUpperCase();
+    return (db.update(db.qsos)
+          ..where((t) =>
+              t.call.equals(call.toUpperCase()) &
+              (t.gridsquare.isNull() | t.gridsquare.equals(''))))
+        .write(QsosCompanion(gridsquare: Value(g)));
+  }
+
+  /// One-shot cleanup for rows created before `freqToBand` learned about
+  /// 11 m: the UDP path stamped band as e.g. `27.245mhz`, while the ADIF
+  /// tail wrote `11m` for the same QSO. That mismatch defeated the dedup
+  /// key and left duplicate rows in review. We normalise the stray label,
+  /// rebuild the dedup key, and drop any row whose corrected key collides
+  /// with an existing `11m` twin (keeping the older/canonical row).
+  Future<void> repairCbBandDuplicates() async {
+    // LIKE is case-insensitive in SQLite for ASCII, so both `27.245MHz` and
+    // `27.245mhz` variants match.
+    final rows = await (db.select(db.qsos)
+          ..where((t) => t.band.like('%mhz')))
+        .get();
+    for (final q in rows) {
+      final f = q.freqMhz;
+      if (f == null || f < 26.9 || f >= 27.5) continue;
+      final newKey = qsoDedupKey(
+        call: q.call, timeOnUtc: q.timeOn, band: '11m', mode: q.mode,
+      );
+      final twin = await (db.select(db.qsos)
+            ..where((t) => t.dedupKey.equals(newKey) & t.id.equals(q.id).not()))
+          .getSingleOrNull();
+      if (twin != null) {
+        await (db.delete(db.qsos)..where((t) => t.id.equals(q.id))).go();
+      } else {
+        await (db.update(db.qsos)..where((t) => t.id.equals(q.id))).write(
+          QsosCompanion(band: const Value('11m'), dedupKey: Value(newKey)),
+        );
+      }
+    }
+  }
+
   // ---------------- Equipment library ----------------
 
   Stream<List<Antenna>> watchAntennas() =>
@@ -300,6 +344,7 @@ class QsoRepository {
     int? radioId,
     String? personalNotes,
     int? rating,
+    String? gridsquare,
     bool markReviewed = false,
     bool clearAntenna = false,
     bool clearRadio = false,
@@ -309,6 +354,7 @@ class QsoRepository {
       radioId:        clearRadio   ? const Value(null) : (radioId   != null ? Value(radioId)   : const Value.absent()),
       personalNotes:  personalNotes != null ? Value(personalNotes) : const Value.absent(),
       rating:         rating != null ? Value(rating) : const Value.absent(),
+      gridsquare:     gridsquare != null ? Value(gridsquare) : const Value.absent(),
       reviewedAt:     markReviewed ? Value(DateTime.now().toUtc()) : const Value.absent(),
     ));
   }
@@ -317,6 +363,11 @@ class QsoRepository {
 
   Future<void> unmarkReviewed(int qsoId) =>
       (db.update(db.qsos)..where((t) => t.id.equals(qsoId))).write(const QsosCompanion(reviewedAt: Value(null)));
+
+  /// Permanently delete a QSO. Callsign→grid cache is left alone since it's
+  /// shared across many QSOs for the same call.
+  Future<int> deleteQso(int qsoId) =>
+      (db.delete(db.qsos)..where((t) => t.id.equals(qsoId))).go();
 
   Stream<List<Qso>> watchAll({
     int limit = 500,
@@ -596,24 +647,6 @@ class QsoRepository {
       worstSnr: worstSnr, worstSnrQso: worstSnrQso,
       longestKm: longestKm, longestQso: longestQso,
     );
-  }
-
-  /// Frequency-usage histogram grouped by [binKhz] wide bins. Returns
-  /// `{ centerKhz : count }` sorted by frequency ascending.
-  Future<Map<int, int>> freqHistogramKhz({int binKhz = 5}) async {
-    final rows = await db.customSelect(
-      'SELECT freq_mhz AS f FROM qsos WHERE freq_mhz IS NOT NULL',
-    ).get();
-    final buckets = <int, int>{};
-    for (final r in rows) {
-      final f = r.read<double?>('f');
-      if (f == null) continue;
-      final khz = (f * 1000).round();
-      final bin = (khz ~/ binKhz) * binKhz + binKhz ~/ 2;
-      buckets[bin] = (buckets[bin] ?? 0) + 1;
-    }
-    final sorted = buckets.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
-    return {for (final e in sorted) e.key: e.value};
   }
 
   static DateTime _mergeTime(String yyyymmdd, String hhmm) {

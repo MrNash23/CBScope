@@ -34,6 +34,12 @@ class WsjtxStatus extends WsjtxMessage {
   final bool txWatchdog;
   final String? subMode;
   final bool fastMode;
+  /// Schema-3 field carrying the exact TX text WSJT-X is currently
+  /// transmitting (e.g. `CQ IZ0ABC JN61` or `19DC012 IZ0ABC -05`). The only
+  /// reliable way to distinguish "calling CQ" from "replying to a CQ"
+  /// without message-level parsing. Null on older schemas or if the packet
+  /// was truncated.
+  final String? txMessage;
 
   const WsjtxStatus({
     required super.id,
@@ -53,6 +59,7 @@ class WsjtxStatus extends WsjtxMessage {
     required this.txWatchdog,
     required this.subMode,
     required this.fastMode,
+    this.txMessage,
   });
 }
 
