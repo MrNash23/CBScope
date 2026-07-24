@@ -299,18 +299,22 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           });
       // Calling: our own transmission is directed at `dxCall`. Primary
       // signal is the schema-3 `txMessage` from Status; fallback to offAir
-      // Decode echoes if Status didn't carry it.
+      // Decode echoes if Status didn't carry it. Gated on transmitting=true
+      // because Status keeps the queued txMessage populated long after a
+      // QSO ends — without the gate, a past QSO's target keeps showing.
       bool callingTarget = false;
-      final txMsg = wsjtxStatus.txMessage?.trim().toUpperCase();
-      if (txMsg != null && txMsg.isNotEmpty) {
-        callingTarget = firstToken(txMsg) == call;
-      } else {
-        final selfCutoff = now.subtract(const Duration(seconds: 60));
-        callingTarget = decodes.any((d) {
-          if (!d.receivedAt.isAfter(selfCutoff)) return false;
-          if (!d.decode.offAir) return false;
-          return firstToken(d.decode.message) == call;
-        });
+      if (wsjtxStatus.transmitting) {
+        final txMsg = wsjtxStatus.txMessage?.trim().toUpperCase();
+        if (txMsg != null && txMsg.isNotEmpty) {
+          callingTarget = firstToken(txMsg) == call;
+        } else {
+          final selfCutoff = now.subtract(const Duration(seconds: 60));
+          callingTarget = decodes.any((d) {
+            if (!d.receivedAt.isAfter(selfCutoff)) return false;
+            if (!d.decode.offAir) return false;
+            return firstToken(d.decode.message) == call;
+          });
+        }
       }
       final logCutoff = now.toUtc().subtract(const Duration(minutes: 5));
       final alreadyLogged = qsos.any((q) =>

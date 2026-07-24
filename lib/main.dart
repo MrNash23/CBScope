@@ -40,7 +40,10 @@ Future<void> main() async {
       minimumSize: Size(960, 620),
       title: 'CBScope',
       titleBarStyle: TitleBarStyle.hidden,
-      backgroundColor: Colors.transparent,
+      // Match the app's dark surface so the OS-managed window is already
+      // solid before Flutter's first paint — otherwise the launching-app
+      // gap flashes whatever is behind (desktop, DMG background, etc.).
+      backgroundColor: Color(0xFF04070A),
     );
     await windowManager.waitUntilReadyToShow(opts, () async {
       await windowManager.show();
