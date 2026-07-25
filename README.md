@@ -6,6 +6,14 @@ Streams decodes and QSOs live from WSJT-CB over UDP, tails your ADIF log for aut
 
 <p align="center"><img src="CBScope-Logo.png" width="140" alt="CBScope"></p>
 
+## Screenshots
+
+![Map with logged QSOs, PSK Reporter spots, and equipment heatmap panel](screenshots/map-screen.png)
+*Logged QSOs, live PSK Reporter spots, propagation strip, and the layered filter/equipment panel.*
+
+![Live running-QSO overlay: engaged line and marker to a DX station](screenshots/QSO.png)
+*Running-QSO overlay — animated line and callsign marker to the DX you're currently working, driven straight from WSJT-CB's Status packet.*
+
 ## Features
 
 **Live**
