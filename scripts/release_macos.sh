@@ -49,10 +49,18 @@ echo "==> Notary profile: $NOTARY_PROFILE"
 echo "==> Building release..."
 flutter build macos --release
 
+# --------------------------------------------------------- bundle TTS runtime
+# Drop the sherpa-onnx binary + libs + Alan voice into
+# Contents/Resources/tts/ BEFORE the codesign pass so the outer signature
+# covers them. Otherwise notarization would reject the .app or macOS
+# would flag it as damaged on any Mac other than the build machine.
+echo "==> Bundling TTS runtime..."
+./scripts/bundle_tts.sh "$APP_PATH"
+
 # --------------------------------------------------------------------- sign
-# Sign bottom-up: every framework and helper first, then the outer .app with
-# entitlements + hardened runtime. Bundling `--options runtime` is required
-# for Apple to accept the submission.
+# Sign bottom-up: every framework, dylib, and TTS executable first, then
+# the outer .app with entitlements + hardened runtime. `--options runtime`
+# is required for notarization.
 echo "==> Signing frameworks..."
 while IFS= read -r -d '' fw; do
   codesign --force --sign "$SIGN_ID" --timestamp --options runtime "$fw"
@@ -64,6 +72,16 @@ while IFS= read -r -d '' dylib; do
   codesign --force --sign "$SIGN_ID" --timestamp --options runtime "$dylib"
 done < <(find "$APP_PATH/Contents/Frameworks" -type f -name "*.dylib" \
               -print0 2>/dev/null || true)
+
+# TTS runtime lives under Contents/Resources/tts/, outside Frameworks/.
+# Sign each .dylib and executable individually with the same options.
+echo "==> Signing bundled TTS runtime..."
+if [[ -d "$APP_PATH/Contents/Resources/tts" ]]; then
+  while IFS= read -r -d '' f; do
+    codesign --force --sign "$SIGN_ID" --timestamp --options runtime "$f"
+  done < <(find "$APP_PATH/Contents/Resources/tts" \
+               \( -name "*.dylib" -o -perm -u+x -type f \) -print0)
+fi
 
 echo "==> Signing app bundle..."
 codesign --force --sign "$SIGN_ID" --timestamp --options runtime \

@@ -1,3 +1,7 @@
+# Bundled TTS runtime downloaded on demand by scripts/bundle_tts.sh
+# (sherpa-onnx binaries + Piper VITS voice model). Never committed.
+/third_party/
+
 # Miscellaneous
 *.class
 *.log

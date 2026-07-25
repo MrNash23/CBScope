@@ -42,6 +42,10 @@ dependencies:
   intl: ^0.19.0
   collection: ^1.19.0
 
+  # Voice output (Phase 3): plays the WAV synthesised by the bundled
+  # sherpa-onnx subprocess. Works on macOS/Linux/Windows.
+  audioplayers: ^6.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

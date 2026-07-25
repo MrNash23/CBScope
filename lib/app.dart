@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/widgets/sidebar.dart';
+import 'data/voice/voice_pipeline.dart';
 import 'features/live/live_screen.dart';
 import 'features/logbook/logbook_screen.dart';
 import 'features/map/map_screen.dart';
@@ -159,11 +160,13 @@ class _ShellState extends ConsumerState<_Shell> {
   Widget build(BuildContext context) {
     // Kick off UDP + ADIF ingestion side-effects, plus keep PSK Reporter
     // polling alive even when the map isn't visible so switching to it is
-    // instant instead of a 15 s cold start.
+    // instant instead of a 15 s cold start. Voice pipeline mounts every
+    // announcement listener so events reach the TTS backend from any tab.
     ref.watch(qsoLoggedIngestProvider);
     ref.watch(adifTailProvider);
     ref.watch(udpListenerProvider);
     ref.watch(pskSpotsProvider);
+    ref.watch(voicePipelineProvider);
 
     Widget body;
     switch (_index) {

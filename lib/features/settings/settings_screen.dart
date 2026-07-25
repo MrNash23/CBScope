@@ -10,6 +10,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_card.dart';
 import '../../core/widgets/color_swatch_picker.dart';
 import '../../data/db/database.dart';
+import '../../data/voice/voice_pipeline.dart';
 import '../../providers/providers.dart';
 
 /// Nuke-from-orbit reset. Wipes the Drift DB, the SharedPreferences plist,
@@ -113,6 +114,290 @@ class _DangerZoneSection extends ConsumerWidget {
 
 /// Full CSV export of the local logbook — a personal backup that stays
 /// forward-compatible as we add more datapoints.
+/// Voice announcements panel. Master switch collapses/reveals the per-event
+/// grid + rate limit + quiet hours. Events are grouped exactly like the
+/// design catalogue (Discovery / My QSO / Milestones / Propagation / System).
+class _VoiceSection extends ConsumerWidget {
+  const _VoiceSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    final settings = ref.watch(settingsProvider);
+
+    void toggleEvent(VoiceEvent e, bool on) {
+      final next = {...settings.voiceEvents};
+      if (on) {
+        next.add(e);
+      } else {
+        next.remove(e);
+      }
+      ref.read(settingsProvider.notifier).update(
+            settings.copyWith(voiceEvents: next),
+          );
+    }
+
+    // Group the events for section rendering. Order of insertion determines
+    // display order; the enum itself is grouped in declaration order.
+    final grouped = <String, List<VoiceEvent>>{};
+    for (final e in VoiceEvent.values) {
+      grouped.putIfAbsent(e.groupLabel, () => []).add(e);
+    }
+
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.record_voice_over_outlined, size: 14, color: c.subtle),
+              const SizedBox(width: 6),
+              Text('VOICE ANNOUNCEMENTS', style: t.labelSmall),
+              const Spacer(),
+              Switch.adaptive(
+                value: settings.voiceEnabled,
+                onChanged: (v) {
+                  // First-ever enable: seed with the low-noise default set
+                  // so the user doesn't have to hunt through every toggle.
+                  final events = (v && settings.voiceEvents.isEmpty)
+                      ? AppSettings.defaultOnEvents
+                      : settings.voiceEvents;
+                  ref.read(settingsProvider.notifier).update(
+                        settings.copyWith(
+                          voiceEnabled: v,
+                          voiceEvents: events,
+                        ),
+                      );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            settings.voiceEnabled
+                ? 'voice announcements for the events selected below.'
+                : 'Turn on to have selected events read out loud.',
+            style: t.bodySmall?.copyWith(color: c.subtle),
+          ),
+          if (settings.voiceEnabled) ...[
+            const SizedBox(height: 10),
+            _TestVoiceButton(),
+            const SizedBox(height: 14),
+            for (final entry in grouped.entries) ...[
+              Text(entry.key.toUpperCase(), style: t.labelSmall),
+              const SizedBox(height: 4),
+              for (final e in entry.value)
+                _eventRow(context, e, settings, toggleEvent),
+              const SizedBox(height: 10),
+            ],
+            _thresholdRow(
+              context,
+              label: 'Long-distance threshold',
+              value: settings.voiceNotableDxKm,
+              suffix: 'km',
+              min: 1000,
+              max: 15000,
+              divisions: 28,
+              onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                    settings.copyWith(voiceNotableDxKm: v),
+                  ),
+            ),
+            _thresholdRow(
+              context,
+              label: 'Strong-signal threshold',
+              value: settings.voiceStrongSignalDb,
+              suffix: 'dB',
+              min: -10,
+              max: 10,
+              divisions: 20,
+              onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                    settings.copyWith(voiceStrongSignalDb: v),
+                  ),
+            ),
+            _thresholdRow(
+              context,
+              label: 'Solar-flux threshold',
+              value: settings.voiceSolarFluxSfi,
+              suffix: 'SFI',
+              min: 70,
+              max: 300,
+              divisions: 46,
+              onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                    settings.copyWith(voiceSolarFluxSfi: v),
+                  ),
+            ),
+            const SizedBox(height: 8),
+            _thresholdRow(
+              context,
+              label: 'Max announcements / min',
+              value: settings.voiceRateLimitPerMinute,
+              suffix: '/min',
+              min: 1,
+              max: 20,
+              divisions: 19,
+              onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                    settings.copyWith(voiceRateLimitPerMinute: v),
+                  ),
+            ),
+            const SizedBox(height: 8),
+            _quietHoursRow(context, ref, settings),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _eventRow(BuildContext context, VoiceEvent e, AppSettings settings,
+      void Function(VoiceEvent, bool) toggle) {
+    final t = Theme.of(context).textTheme;
+    final on = settings.voiceEvents.contains(e);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(child: Text(e.label, style: t.bodyMedium)),
+          Switch.adaptive(
+            value: on,
+            onChanged: (v) => toggle(e, v),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _thresholdRow(
+    BuildContext context, {
+    required String label,
+    required int value,
+    required String suffix,
+    required int min,
+    required int max,
+    required int divisions,
+    required ValueChanged<int> onChanged,
+  }) {
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(width: 200, child: Text(label, style: t.bodyMedium)),
+          Expanded(
+            child: Slider(
+              value: value.toDouble(),
+              min: min.toDouble(),
+              max: max.toDouble(),
+              divisions: divisions,
+              label: '$value $suffix',
+              onChanged: (v) => onChanged(v.round()),
+            ),
+          ),
+          SizedBox(
+            width: 70,
+            child: Text('$value $suffix',
+                style: t.bodySmall, textAlign: TextAlign.right),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quietHoursRow(
+      BuildContext context, WidgetRef ref, AppSettings settings) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    final enabled = settings.voiceQuietStartMin != null &&
+        settings.voiceQuietEndMin != null;
+    String fmt(int mins) =>
+        '${(mins ~/ 60).toString().padLeft(2, '0')}:${(mins % 60).toString().padLeft(2, '0')}';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 200,
+            child: Text('Quiet hours (UTC)', style: t.bodyMedium),
+          ),
+          Switch.adaptive(
+            value: enabled,
+            onChanged: (v) {
+              ref.read(settingsProvider.notifier).update(
+                    v
+                        ? settings.copyWith(
+                            voiceQuietStartMin: 22 * 60,
+                            voiceQuietEndMin: 7 * 60,
+                          )
+                        : settings.copyWith(clearVoiceQuiet: true),
+                  );
+            },
+          ),
+          const SizedBox(width: 8),
+          if (enabled) ...[
+            Text('${fmt(settings.voiceQuietStartMin!)} → '
+                '${fmt(settings.voiceQuietEndMin!)}',
+                style: t.bodySmall?.copyWith(fontFamily: 'Menlo')),
+            const SizedBox(width: 6),
+            Text('(tap switch to disable)',
+                style: t.labelSmall?.copyWith(color: c.subtle)),
+          ] else
+            Text('off', style: t.bodySmall?.copyWith(color: c.subtle)),
+        ],
+      ),
+    );
+  }
+}
+
+/// User-triggerable pipeline probe. Fires a test announcement through the
+/// real [VoiceAnnouncer] (bypassing rate-limit + quiet-hours) so the user
+/// can confirm everything is wired up. Snackbar reports back whether the
+/// currently-active backend produces audio or only writes to the console.
+class _TestVoiceButton extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    return Row(
+      children: [
+        TextButton.icon(
+          icon: const Icon(Icons.play_arrow, size: 15),
+          label: const Text('Test voice'),
+          style: TextButton.styleFrom(
+            foregroundColor: c.text,
+            backgroundColor: c.card,
+            side: BorderSide(color: c.border),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+          onPressed: () {
+            final settings = ref.read(settingsProvider);
+            final backend = ref.read(ttsBackendProvider);
+            final announcer = ref.read(voiceAnnouncerProvider);
+            final messenger = ScaffoldMessenger.of(context);
+            if (!settings.voiceEnabled) {
+              messenger.showSnackBar(const SnackBar(
+                content: Text('Voice is off — turn on the master switch first.'),
+                behavior: SnackBarBehavior.floating,
+              ));
+              return;
+            }
+            announcer.sayTest(
+              'Test announcement. C-B-Scope voice pipeline standing by.',
+            );
+            final isDebug = backend.runtimeType.toString() == 'DebugTtsBackend';
+            messenger.showSnackBar(SnackBar(
+              content: Text(isDebug
+                  ? 'Test fired ✓ — printed to stderr (audio backend not compiled).'
+                  : 'Test fired ✓ — Alan should speak in ~1 s. '
+                      'No sound? Check scripts/bundle_tts.sh ran against this .app.'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+            ));
+          },
+        ),
+      ],
+    );
+  }
+}
+
 /// Attribution for the two external data sources CBScope pulls from at
 /// runtime. Rendered as a small settings card so end users see the credit
 /// even if they never open the source.
@@ -483,6 +768,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ]),
           const SizedBox(height: 16),
           _EquipmentSection(),
+          const SizedBox(height: 16),
+          const _VoiceSection(),
           const SizedBox(height: 16),
           _BackupSection(),
           const SizedBox(height: 16),

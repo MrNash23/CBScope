@@ -71,6 +71,32 @@ class AppSettings {
   /// theme's built-in default (Tron cyan in dark, dark cyan in light).
   final Color? themeAccent;
 
+  // -------- Voice announcements ---------------------------------------------
+
+  /// Master switch. When false, no speech and no per-event toggles shown.
+  final bool voiceEnabled;
+
+  /// Which announcement events are enabled.
+  final Set<VoiceEvent> voiceEvents;
+
+  /// Distance threshold (km) for [VoiceEvent.notableDx].
+  final int voiceNotableDxKm;
+
+  /// SNR threshold (dB) for [VoiceEvent.strongSignal].
+  final int voiceStrongSignalDb;
+
+  /// SFI threshold for [VoiceEvent.solarFluxThreshold] (announced when
+  /// crossed in either direction).
+  final int voiceSolarFluxSfi;
+
+  /// Max announcements per minute — protects against flurry storms.
+  final int voiceRateLimitPerMinute;
+
+  /// Quiet-hours window (minutes past UTC midnight). `null` on either
+  /// end disables the mute.
+  final int? voiceQuietStartMin;
+  final int? voiceQuietEndMin;
+
   const AppSettings({
     required this.udpPort,
     required this.bindAddress,
@@ -93,7 +119,24 @@ class AppSettings {
     required this.mapStyle,
     required this.mapGreylineEnabled,
     this.themeAccent,
+    this.voiceEnabled = false,
+    this.voiceEvents = const {},
+    this.voiceNotableDxKm = 5000,
+    this.voiceStrongSignalDb = 0,
+    this.voiceSolarFluxSfi = 150,
+    this.voiceRateLimitPerMinute = 4,
+    this.voiceQuietStartMin,
+    this.voiceQuietEndMin,
   });
+
+  /// Sensible on-by-default events after the master switch is first flipped
+  /// on. Only high-value, low-noise events so the first-run experience isn't
+  /// an audio monologue.
+  static const Set<VoiceEvent> defaultOnEvents = {
+    VoiceEvent.newCountryCq,
+    VoiceEvent.incomingCall,
+    VoiceEvent.qsoLogged,
+  };
 
   AppSettings copyWith({
     int? udpPort,
@@ -117,9 +160,18 @@ class AppSettings {
     MapStyle? mapStyle,
     bool? mapGreylineEnabled,
     Color? themeAccent,
+    bool? voiceEnabled,
+    Set<VoiceEvent>? voiceEvents,
+    int? voiceNotableDxKm,
+    int? voiceStrongSignalDb,
+    int? voiceSolarFluxSfi,
+    int? voiceRateLimitPerMinute,
+    int? voiceQuietStartMin,
+    int? voiceQuietEndMin,
     bool clearMulticast = false,
     bool clearAdifPath = false,
     bool clearThemeAccent = false,
+    bool clearVoiceQuiet = false,
   }) =>
       AppSettings(
         udpPort: udpPort ?? this.udpPort,
@@ -145,7 +197,93 @@ class AppSettings {
         mapGreylineEnabled: mapGreylineEnabled ?? this.mapGreylineEnabled,
         themeAccent:
             clearThemeAccent ? null : (themeAccent ?? this.themeAccent),
+        voiceEnabled: voiceEnabled ?? this.voiceEnabled,
+        voiceEvents: voiceEvents ?? this.voiceEvents,
+        voiceNotableDxKm: voiceNotableDxKm ?? this.voiceNotableDxKm,
+        voiceStrongSignalDb: voiceStrongSignalDb ?? this.voiceStrongSignalDb,
+        voiceSolarFluxSfi: voiceSolarFluxSfi ?? this.voiceSolarFluxSfi,
+        voiceRateLimitPerMinute:
+            voiceRateLimitPerMinute ?? this.voiceRateLimitPerMinute,
+        voiceQuietStartMin: clearVoiceQuiet
+            ? null
+            : (voiceQuietStartMin ?? this.voiceQuietStartMin),
+        voiceQuietEndMin: clearVoiceQuiet
+            ? null
+            : (voiceQuietEndMin ?? this.voiceQuietEndMin),
       );
+}
+
+/// Discrete voice-announcement events. Each can be individually toggled in
+/// Settings (Set<VoiceEvent> on AppSettings). New enum values must be
+/// appended, never reordered — index is persisted.
+enum VoiceEvent {
+  // Discovery / DX opportunities
+  newCallCq,
+  newGridCq,
+  newCountryCq,
+  notableDx,
+  strongSignal,
+  // Your QSO
+  incomingCall,
+  qsoLogged,
+  qsoAbandoned,
+  // Milestones
+  firstCountry,
+  firstGrid,
+  personalBestDx,
+  qsoCountMilestone,
+  // Propagation / band
+  bandOpening,
+  solarFluxThreshold,
+  greylineWindow,
+  // System
+  connectionLost,
+  connectionRestored,
+}
+
+extension VoiceEventX on VoiceEvent {
+  String get label => switch (this) {
+        VoiceEvent.newCallCq => 'New callsign calls CQ',
+        VoiceEvent.newGridCq => 'New grid calls CQ',
+        VoiceEvent.newCountryCq => 'New DXCC country calls CQ',
+        VoiceEvent.notableDx => 'Long-distance decode',
+        VoiceEvent.strongSignal => 'Exceptionally strong signal',
+        VoiceEvent.incomingCall => 'Someone calls me',
+        VoiceEvent.qsoLogged => 'QSO logged',
+        VoiceEvent.qsoAbandoned => 'QSO attempt abandoned',
+        VoiceEvent.firstCountry => 'First contact with a new country',
+        VoiceEvent.firstGrid => 'First contact from a new grid',
+        VoiceEvent.personalBestDx => 'New personal-best DX distance',
+        VoiceEvent.qsoCountMilestone => 'Round-number QSO milestone',
+        VoiceEvent.bandOpening => 'Band opening detected',
+        VoiceEvent.solarFluxThreshold => 'Solar flux threshold crossed',
+        VoiceEvent.greylineWindow => 'Greyline window opens at my QTH',
+        VoiceEvent.connectionLost => 'WSJT-CB disconnected',
+        VoiceEvent.connectionRestored => 'WSJT-CB reconnected',
+      };
+
+  String get groupLabel => switch (this) {
+        VoiceEvent.newCallCq ||
+        VoiceEvent.newGridCq ||
+        VoiceEvent.newCountryCq ||
+        VoiceEvent.notableDx ||
+        VoiceEvent.strongSignal =>
+          'Discovery',
+        VoiceEvent.incomingCall ||
+        VoiceEvent.qsoLogged ||
+        VoiceEvent.qsoAbandoned =>
+          'My QSO',
+        VoiceEvent.firstCountry ||
+        VoiceEvent.firstGrid ||
+        VoiceEvent.personalBestDx ||
+        VoiceEvent.qsoCountMilestone =>
+          'Milestones',
+        VoiceEvent.bandOpening ||
+        VoiceEvent.solarFluxThreshold ||
+        VoiceEvent.greylineWindow =>
+          'Propagation',
+        VoiceEvent.connectionLost || VoiceEvent.connectionRestored => 'System',
+      };
 }
 
 enum ThemeModePref { system, light, dark }
@@ -242,7 +380,35 @@ class SettingsController extends StateNotifier<AppSettings> {
           themeAccent: prefs.containsKey('themeAccent')
               ? Color(prefs.getInt('themeAccent')!)
               : null,
+          voiceEnabled: prefs.getBool('voice.enabled') ?? false,
+          voiceEvents: _readVoiceEvents(prefs),
+          voiceNotableDxKm: prefs.getInt('voice.notableDxKm') ?? 5000,
+          voiceStrongSignalDb: prefs.getInt('voice.strongSignalDb') ?? 0,
+          voiceSolarFluxSfi: prefs.getInt('voice.solarFluxSfi') ?? 150,
+          voiceRateLimitPerMinute:
+              (prefs.getInt('voice.rateLimitPerMinute') ?? 4).clamp(1, 20),
+          voiceQuietStartMin: prefs.getInt('voice.quietStartMin'),
+          voiceQuietEndMin: prefs.getInt('voice.quietEndMin'),
         ));
+
+  /// Decode the stored comma-separated list of enabled voice-event indices.
+  /// Falls back to [AppSettings.defaultOnEvents] when the key isn't present
+  /// (fresh install), and to an empty set when the key exists but is empty
+  /// (user explicitly disabled everything).
+  static Set<VoiceEvent> _readVoiceEvents(SharedPreferences prefs) {
+    if (!prefs.containsKey('voice.events')) {
+      return AppSettings.defaultOnEvents;
+    }
+    final raw = prefs.getString('voice.events') ?? '';
+    if (raw.isEmpty) return const {};
+    return raw
+        .split(',')
+        .map(int.tryParse)
+        .whereType<int>()
+        .where((i) => i >= 0 && i < VoiceEvent.values.length)
+        .map((i) => VoiceEvent.values[i])
+        .toSet();
+  }
 
   Future<void> update(AppSettings next) async {
     state = next;
@@ -281,6 +447,25 @@ class SettingsController extends StateNotifier<AppSettings> {
       await prefs.remove('themeAccent');
     } else {
       await prefs.setInt('themeAccent', next.themeAccent!.value);
+    }
+    await prefs.setBool('voice.enabled', next.voiceEnabled);
+    await prefs.setString(
+      'voice.events',
+      next.voiceEvents.map((e) => e.index).join(','),
+    );
+    await prefs.setInt('voice.notableDxKm', next.voiceNotableDxKm);
+    await prefs.setInt('voice.strongSignalDb', next.voiceStrongSignalDb);
+    await prefs.setInt('voice.solarFluxSfi', next.voiceSolarFluxSfi);
+    await prefs.setInt('voice.rateLimitPerMinute', next.voiceRateLimitPerMinute);
+    if (next.voiceQuietStartMin == null) {
+      await prefs.remove('voice.quietStartMin');
+    } else {
+      await prefs.setInt('voice.quietStartMin', next.voiceQuietStartMin!);
+    }
+    if (next.voiceQuietEndMin == null) {
+      await prefs.remove('voice.quietEndMin');
+    } else {
+      await prefs.setInt('voice.quietEndMin', next.voiceQuietEndMin!);
     }
   }
 }
@@ -736,6 +921,29 @@ final needsReviewCountProvider = StreamProvider<int>(
 final workedCallsignsProvider = FutureProvider<Set<String>>((ref) async {
   ref.watch(logbookProvider);
   return ref.watch(qsoRepoProvider).workedCallsigns();
+});
+
+/// Set of every 4-char grid we've logged. Used by the voice pipeline to
+/// spot the first decode from a never-heard grid square.
+final workedGridsProvider = FutureProvider<Set<String>>((ref) async {
+  final rows = ref.watch(logbookProvider).valueOrNull ?? const <Qso>[];
+  final out = <String>{};
+  for (final q in rows) {
+    final g = q.gridsquare;
+    if (g != null && g.length >= 4) out.add(g.substring(0, 4).toUpperCase());
+  }
+  return out;
+});
+
+/// Set of every DXCC country we've logged.
+final workedCountriesProvider = FutureProvider<Set<String>>((ref) async {
+  final rows = ref.watch(logbookProvider).valueOrNull ?? const <Qso>[];
+  final out = <String>{};
+  for (final q in rows) {
+    final c = q.country;
+    if (c != null && c.isNotEmpty) out.add(c);
+  }
+  return out;
 });
 
 final equipmentStatsProvider = FutureProvider<List<EquipmentStat>>((ref) async {
