@@ -14,6 +14,9 @@ Purpose-built for WSJT-CB. Streams decodes and QSOs live over UDP, tails the ADI
 ![Live running-QSO overlay: engaged line and marker to a DX station](screenshots/QSO.png)
 *Running-QSO overlay — animated line and callsign marker to the DX you're currently working, driven straight from WSJT-CB's Status packet.*
 
+![Equipment heatmap: per-antenna signal clouds coloured by dB](screenshots/antenna-performance.png)
+*Equipment heatmap — pin a radio or antenna and every worked station blooms into a soft signal cloud coloured by RST, so you can see at a glance where each rig actually gets out.*
+
 ## Features
 
 **Live**
