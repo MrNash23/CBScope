@@ -113,6 +113,46 @@ class _DangerZoneSection extends ConsumerWidget {
 
 /// Full CSV export of the local logbook — a personal backup that stays
 /// forward-compatible as we add more datapoints.
+/// Attribution for the two external data sources CBScope pulls from at
+/// runtime. Rendered as a small settings card so end users see the credit
+/// even if they never open the source.
+class _DataCreditsSection extends StatelessWidget {
+  const _DataCreditsSection();
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    TextStyle link() => TextStyle(color: c.accent);
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('DATA CREDITS', style: t.labelSmall),
+          const SizedBox(height: 10),
+          Text.rich(
+            TextSpan(
+              style: t.bodySmall,
+              children: [
+                const TextSpan(text: 'Solar / propagation data © N0NBH — '),
+                TextSpan(text: 'hamqsl.com', style: link()),
+                const TextSpan(text: '.\nCallsign → grid lookups via '),
+                TextSpan(text: 'PSK Reporter', style: link()),
+                const TextSpan(text: ' — pskreporter.info.\n'),
+                TextSpan(
+                  text:
+                      'Both requests are opt-out under the settings above; nothing else leaves your machine.',
+                  style: TextStyle(color: c.subtle),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BackupSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -445,6 +485,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _EquipmentSection(),
           const SizedBox(height: 16),
           _BackupSection(),
+          const SizedBox(height: 16),
+          const _DataCreditsSection(),
           const SizedBox(height: 16),
           _DangerZoneSection(),
           const SizedBox(height: 16),
