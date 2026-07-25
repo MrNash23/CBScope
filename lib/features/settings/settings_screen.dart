@@ -369,7 +369,6 @@ class _TestVoiceButton extends ConsumerWidget {
           ),
           onPressed: () {
             final settings = ref.read(settingsProvider);
-            final backend = ref.read(ttsBackendProvider);
             final announcer = ref.read(voiceAnnouncerProvider);
             final messenger = ScaffoldMessenger.of(context);
             if (!settings.voiceEnabled) {
@@ -382,14 +381,10 @@ class _TestVoiceButton extends ConsumerWidget {
             announcer.sayTest(
               'Test announcement. C-B-Scope voice pipeline standing by.',
             );
-            final isDebug = backend.runtimeType.toString() == 'DebugTtsBackend';
-            messenger.showSnackBar(SnackBar(
-              content: Text(isDebug
-                  ? 'Test fired ✓ — printed to stderr (audio backend not compiled).'
-                  : 'Test fired ✓ — Alan should speak in ~1 s. '
-                      'No sound? Check scripts/bundle_tts.sh ran against this .app.'),
+            messenger.showSnackBar(const SnackBar(
+              content: Text('Voice test triggered.'),
               behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 4),
+              duration: Duration(seconds: 2),
             ));
           },
         ),
