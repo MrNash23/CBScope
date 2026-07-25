@@ -2,7 +2,7 @@
 
 **A modern WSJT-CB companion — live map, logbook, and propagation dashboard for 11 m CB FT8 operators.**
 
-Streams decodes and QSOs live from WSJT-CB over UDP, tails your ADIF log for automatic imports, and enriches everything with grid lookups, propagation snapshots, and an interactive world map. Also works with WSJT-X on amateur bands.
+Purpose-built for WSJT-CB. Streams decodes and QSOs live over UDP, tails the ADIF log for automatic imports, and enriches everything with grid lookups, propagation snapshots, and an interactive world map.
 
 <p align="center"><img src="CBScope-Logo.png" width="140" alt="CBScope"></p>
 
@@ -73,7 +73,7 @@ Everything is stored **locally** in an SQLite database under the OS app-support 
 
 ## Stack
 
-Flutter · Riverpod · Drift (SQLite) · flutter_map · WSJT-X UDP protocol (schemas 2 & 3).
+Flutter · Riverpod · Drift (SQLite) · flutter_map · WSJT-CB UDP protocol (schemas 2 & 3).
 
 ## License
 
