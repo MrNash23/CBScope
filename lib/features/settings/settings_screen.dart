@@ -184,6 +184,8 @@ class _VoiceSection extends ConsumerWidget {
           if (settings.voiceEnabled) ...[
             const SizedBox(height: 10),
             _TestVoiceButton(),
+            const SizedBox(height: 10),
+            _VoiceVolumeSlider(),
             const SizedBox(height: 14),
             for (final entry in grouped.entries) ...[
               Text(entry.key.toUpperCase(), style: t.labelSmall),
@@ -389,6 +391,62 @@ class _TestVoiceButton extends ConsumerWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+/// Volume slider with drag-to-preview behaviour: value updates on every
+/// tick so the backend applies it live (audible if an utterance is already
+/// playing); on release we auto-fire a short test phrase so the user can
+/// iterate — drag, listen, drag again.
+class _VoiceVolumeSlider extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    final settings = ref.watch(settingsProvider);
+    final v = settings.voiceVolume;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(
+            v < 0.02
+                ? Icons.volume_off
+                : v < 0.4
+                    ? Icons.volume_down
+                    : Icons.volume_up,
+            size: 16,
+            color: c.subtle,
+          ),
+          const SizedBox(width: 6),
+          SizedBox(width: 60, child: Text('Volume', style: t.bodyMedium)),
+          Expanded(
+            child: Slider(
+              value: v.clamp(0.0, 1.0),
+              min: 0.0,
+              max: 1.0,
+              divisions: 20,
+              label: '${(v * 100).round()}%',
+              onChanged: (nv) {
+                ref
+                    .read(settingsProvider.notifier)
+                    .update(settings.copyWith(voiceVolume: nv));
+              },
+              onChangeEnd: (nv) {
+                // Play a short probe at the new volume once the user
+                // lets go, so they always hear the effect immediately.
+                ref.read(voiceAnnouncerProvider).sayTest('Volume check.');
+              },
+            ),
+          ),
+          SizedBox(
+            width: 42,
+            child: Text('${(v * 100).round()}%',
+                style: t.bodySmall, textAlign: TextAlign.right),
+          ),
+        ],
+      ),
     );
   }
 }

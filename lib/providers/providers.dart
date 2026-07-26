@@ -89,6 +89,10 @@ class AppSettings {
   /// crossed in either direction).
   final int voiceSolarFluxSfi;
 
+  /// Playback volume for spoken announcements, 0.0–1.0. Applied live so
+  /// dragging the settings slider changes any currently-playing utterance.
+  final double voiceVolume;
+
   /// Max announcements per minute — protects against flurry storms.
   final int voiceRateLimitPerMinute;
 
@@ -125,6 +129,7 @@ class AppSettings {
     this.voiceStrongSignalDb = 0,
     this.voiceSolarFluxSfi = 150,
     this.voiceRateLimitPerMinute = 4,
+    this.voiceVolume = 1.0,
     this.voiceQuietStartMin,
     this.voiceQuietEndMin,
   });
@@ -166,6 +171,7 @@ class AppSettings {
     int? voiceStrongSignalDb,
     int? voiceSolarFluxSfi,
     int? voiceRateLimitPerMinute,
+    double? voiceVolume,
     int? voiceQuietStartMin,
     int? voiceQuietEndMin,
     bool clearMulticast = false,
@@ -204,6 +210,7 @@ class AppSettings {
         voiceSolarFluxSfi: voiceSolarFluxSfi ?? this.voiceSolarFluxSfi,
         voiceRateLimitPerMinute:
             voiceRateLimitPerMinute ?? this.voiceRateLimitPerMinute,
+        voiceVolume: voiceVolume ?? this.voiceVolume,
         voiceQuietStartMin: clearVoiceQuiet
             ? null
             : (voiceQuietStartMin ?? this.voiceQuietStartMin),
@@ -387,6 +394,8 @@ class SettingsController extends StateNotifier<AppSettings> {
           voiceSolarFluxSfi: prefs.getInt('voice.solarFluxSfi') ?? 150,
           voiceRateLimitPerMinute:
               (prefs.getInt('voice.rateLimitPerMinute') ?? 4).clamp(1, 20),
+          voiceVolume:
+              (prefs.getDouble('voice.volume') ?? 1.0).clamp(0.0, 1.0),
           voiceQuietStartMin: prefs.getInt('voice.quietStartMin'),
           voiceQuietEndMin: prefs.getInt('voice.quietEndMin'),
         ));
@@ -457,6 +466,7 @@ class SettingsController extends StateNotifier<AppSettings> {
     await prefs.setInt('voice.strongSignalDb', next.voiceStrongSignalDb);
     await prefs.setInt('voice.solarFluxSfi', next.voiceSolarFluxSfi);
     await prefs.setInt('voice.rateLimitPerMinute', next.voiceRateLimitPerMinute);
+    await prefs.setDouble('voice.volume', next.voiceVolume);
     if (next.voiceQuietStartMin == null) {
       await prefs.remove('voice.quietStartMin');
     } else {

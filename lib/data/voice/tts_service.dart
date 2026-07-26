@@ -12,6 +12,12 @@ abstract class TtsBackend {
   /// Interrupt any in-flight utterance. Optional — no-op is fine.
   Future<void> stop() async {}
 
+  /// Update playback volume (0.0–1.0). Applied live to any currently-
+  /// playing utterance where the backend supports it. Default no-op so
+  /// backends without an audible output (e.g. the debug printer) don't
+  /// need to care.
+  Future<void> setVolume(double volume) async {}
+
   void dispose() {}
 }
 
@@ -26,6 +32,9 @@ class DebugTtsBackend implements TtsBackend {
 
   @override
   Future<void> stop() async {}
+
+  @override
+  Future<void> setVolume(double volume) async {}
 
   @override
   void dispose() {}

@@ -198,7 +198,7 @@ class _ShellState extends ConsumerState<_Shell> {
             onSelect: (i) => setState(() => _index = i),
             items: items,
             footer: Text(
-              'v0.1.0',
+              'v0.2.0',
               style: Theme.of(context).textTheme.labelSmall,
             ),
           ),

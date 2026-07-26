@@ -49,6 +49,17 @@ final voicePipelineProvider = Provider<void>((ref) {
   final announcer = ref.watch(voiceAnnouncerProvider);
   final unit = () => ref.read(settingsProvider).distanceUnit;
 
+  // Push settings.voiceVolume into the backend on every change. This
+  // makes the Settings volume slider audible live — dragging it while
+  // an utterance is playing adjusts the current playback immediately.
+  final backend = ref.watch(ttsBackendProvider);
+  backend.setVolume(ref.read(settingsProvider).voiceVolume);
+  ref.listen<AppSettings>(settingsProvider, (prev, next) {
+    if (prev?.voiceVolume != next.voiceVolume) {
+      backend.setVolume(next.voiceVolume);
+    }
+  });
+
   // ---------------- Decode-driven listeners -------------------------------
   ref.listen<AsyncValue<WsjtxMessage>>(wsjtxMessagesProvider, (_, next) {
     next.whenData((m) {

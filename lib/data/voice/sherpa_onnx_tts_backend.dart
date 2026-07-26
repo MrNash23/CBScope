@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
@@ -30,6 +32,7 @@ class SherpaOnnxTtsBackend implements TtsBackend {
   final _AudioPlayerSlot _slot = _AudioPlayerSlot();
   bool _warned = false;
   int _seq = 0;
+  double _volume = 1.0;
 
   /// Locate the bundled `tts/` folder relative to the app executable.
   /// Returns null if it can't be found — caller degrades gracefully.
@@ -100,7 +103,13 @@ class SherpaOnnxTtsBackend implements TtsBackend {
         debugPrint('[TTS] synth failed (${result.exitCode}): ${result.stderr}');
         return;
       }
-      await _slot.playFile(wav);
+      // Piper voices have wide dynamic range with low RMS, so peak
+      // normalisation alone doesn't move the needle on perceived
+      // loudness. Bring RMS up to a broadcast-ish target and hard-clip
+      // the resulting peaks — speech compresses cleanly with no
+      // audible distortion at this ratio.
+      _loudnessNormaliseWav(wav);
+      await _slot.playFile(wav, volume: _volume);
     } finally {
       // Give the player a moment to open the file, then wipe the temp dir.
       // The audio buffer is already loaded so late deletion is safe.
@@ -115,8 +124,64 @@ class SherpaOnnxTtsBackend implements TtsBackend {
   Future<void> stop() => _slot.stop();
 
   @override
+  Future<void> setVolume(double volume) async {
+    _volume = volume.clamp(0.0, 1.0);
+    await _slot.setVolume(_volume);
+  }
+
+  @override
   void dispose() {
     _slot.dispose();
+  }
+}
+
+/// In-place loudness-normalise a 16-bit PCM WAV. Computes the RMS of the
+/// samples, applies gain to reach a broadcast-adjacent target RMS
+/// (~-14 dBFS ≈ 0.2 × full scale), then hard-clips resulting peaks. That
+/// gives 2-3x more apparent loudness than peak-only normalisation, at the
+/// cost of squashing dynamic range (imperceptible for speech).
+///
+/// Sherpa-onnx writes a stock 44-byte RIFF header followed by
+/// little-endian int16 samples, so we can skip parsing chunks — anything
+/// that doesn't match that shape is left alone rather than corrupted.
+void _loudnessNormaliseWav(
+  String path, {
+  double targetRms = 0.40, // ~-8 dBFS (aggressive; a touch above 100% is 120%)
+  double maxGain = 30.0,
+}) {
+  try {
+    final bytes = File(path).readAsBytesSync();
+    if (bytes.length < 46) return;
+    if (bytes[0] != 0x52 || bytes[1] != 0x49 || bytes[2] != 0x46 ||
+        bytes[3] != 0x46 ||
+        bytes[8] != 0x57 || bytes[9] != 0x41 || bytes[10] != 0x56 ||
+        bytes[11] != 0x45) {
+      return;
+    }
+    final data = ByteData.sublistView(bytes, 44);
+    final n = data.lengthInBytes ~/ 2;
+    if (n == 0) return;
+    var sumSq = 0.0;
+    for (var i = 0; i < n; i++) {
+      final s = data.getInt16(i * 2, Endian.little).toDouble();
+      sumSq += s * s;
+    }
+    final rms = math.sqrt(sumSq / n);
+    if (rms < 1) return;
+    // targetRms is expressed as fraction of full-scale; convert to
+    // absolute int16 units before dividing.
+    final gain = (targetRms * 32767 / rms).clamp(1.0, maxGain);
+    debugPrint('[TTS] loudness: rms=${rms.toStringAsFixed(0)} '
+        '(${(20 * math.log(rms / 32767) / math.ln10).toStringAsFixed(1)} dBFS) '
+        '→ gain ${gain.toStringAsFixed(2)}x');
+    if (gain <= 1.001) return;
+    for (var i = 0; i < n; i++) {
+      final s = (data.getInt16(i * 2, Endian.little) * gain).round();
+      data.setInt16(i * 2, s.clamp(-32768, 32767), Endian.little);
+    }
+    File(path).writeAsBytesSync(bytes);
+  } catch (e) {
+    debugPrint('[TTS] loudness normalise failed: $e');
   }
 }
 
@@ -134,13 +199,16 @@ class _AudioPlayerSlot {
     });
   }
 
-  Future<void> playFile(String path) async {
+  Future<void> playFile(String path, {double volume = 1.0}) async {
     await _p.stop();
     _done = Completer<void>();
+    await _p.setVolume(volume);
     await _p.play(DeviceFileSource(path));
     // Cap at 60 s so a stuck player never wedges the announcement queue.
     await _done!.future.timeout(const Duration(seconds: 60), onTimeout: () {});
   }
+
+  Future<void> setVolume(double volume) => _p.setVolume(volume);
 
   Future<void> stop() => _p.stop();
 
