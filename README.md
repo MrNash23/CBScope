@@ -47,6 +47,11 @@ Purpose-built for WSJT-CB. Streams decodes and QSOs live over UDP, tails the ADI
 - QSO/day chart, distance polar chart
 - Per-equipment performance table (QSOs, grids, countries, avg / best DX, avg RST)
 
+**Voice**
+- Optional spoken alerts for events you care about — new callsigns / grids / countries calling CQ, someone answering your call, QSO logged, personal-best DX, milestones, propagation swings, WSJT-CB connection health
+- Uses the bundled Alan voice (British male, Piper VITS) via a compact sherpa-onnx runtime; fully offline, no cloud calls
+- Per-event toggles, adjustable thresholds, rate limit, and UTC quiet-hours all live in *Settings → Voice announcements*
+
 ## Quick start
 
 1. Grab `CBScope.dmg` from the [releases page](../../releases) and drag `CBScope.app` into `/Applications`. Releases are signed with an Apple Developer ID and notarized, so Gatekeeper will let it open without ceremony.
