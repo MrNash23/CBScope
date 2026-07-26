@@ -177,7 +177,7 @@ class _VoiceSection extends ConsumerWidget {
           const SizedBox(height: 8),
           Text(
             settings.voiceEnabled
-                ? 'voice announcements for the events selected below.'
+                ? 'Voice announcements for the events selected below.'
                 : 'Turn on to have selected events read out loud.',
             style: t.bodySmall?.copyWith(color: c.subtle),
           ),
