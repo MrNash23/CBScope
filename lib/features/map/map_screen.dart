@@ -335,8 +335,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       }
     }
     final showRunningLayer = _showRunningQso && hasRunning;
-    const runningColor = Color(0xFFFF7A1A); // bright orange — deliberately
-    // distinct from qso/decode/psk palette so the eye finds it instantly.
+    // Bright red so the running-QSO line/marker is unmistakable — a tick
+    // brighter than the app's danger-red so it still reads at small size.
+    const runningColor = Color(0xFFFF3050);
 
     // "Calling CQ" detection for the QTH marker.
     // Primary signal: WSJT-X schema-3 Status carries the exact TX message

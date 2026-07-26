@@ -13,6 +13,78 @@ import '../../data/db/database.dart';
 import '../../data/voice/voice_pipeline.dart';
 import '../../providers/providers.dart';
 
+/// Reusable collapsible card for the settings page. Header shows the
+/// title + optional icon + chevron; body appears/disappears on tap. Keeps
+/// the visual language of the old inline sections but lets heavy panels
+/// (Voice, Equipment) stay tucked away until needed.
+class _CollapsibleGroup extends StatefulWidget {
+  final String title;
+  final IconData? icon;
+  final Widget child;
+  final bool initiallyOpen;
+  final Color? titleColor;
+
+  const _CollapsibleGroup({
+    required this.title,
+    this.icon,
+    required this.child,
+    this.initiallyOpen = false,
+    this.titleColor,
+  });
+
+  @override
+  State<_CollapsibleGroup> createState() => _CollapsibleGroupState();
+}
+
+class _CollapsibleGroupState extends State<_CollapsibleGroup> {
+  late bool _open = widget.initiallyOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final c = context.colors;
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              child: Row(
+                children: [
+                  if (widget.icon != null) ...[
+                    Icon(widget.icon,
+                        size: 14, color: widget.titleColor ?? c.subtle),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Text(
+                      widget.title.toUpperCase(),
+                      style: t.labelSmall?.copyWith(color: widget.titleColor),
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: _open ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 160),
+                    child: Icon(Icons.expand_more, size: 18, color: c.subtle),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_open)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: widget.child,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Nuke-from-orbit reset. Wipes the Drift DB, the SharedPreferences plist,
 /// and any cached files under Application Support so the app comes up in
 /// exactly the same state as a fresh install. Requires a confirmation
@@ -22,38 +94,28 @@ class _DangerZoneSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = Theme.of(context).textTheme;
     final c = context.colors;
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      color: c.card,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Icon(Icons.warning_amber_rounded, size: 14, color: c.danger),
-            const SizedBox(width: 6),
-            Text('DANGER ZONE', style: t.labelSmall?.copyWith(color: c.danger)),
-          ]),
-          const SizedBox(height: 10),
-          Text(
-            'Reset the app to a fresh install. Deletes every QSO, all equipment, '
-            'the callsign-grid cache, PSK Reporter cache, and every setting you '
-            'have entered. This cannot be undone.',
-            style: t.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Row(children: [
-            OutlinedButton.icon(
-              icon: Icon(Icons.delete_forever, size: 14, color: c.danger),
-              label: Text('Reset all data…', style: TextStyle(color: c.danger)),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: c.danger),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              ),
-              onPressed: () => _confirmAndReset(context, ref),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Reset the app to a fresh install. Deletes every QSO, all equipment, '
+          'the callsign-grid cache, PSK Reporter cache, and every setting you '
+          'have entered. This cannot be undone.',
+          style: t.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        Row(children: [
+          OutlinedButton.icon(
+            icon: Icon(Icons.delete_forever, size: 14, color: c.danger),
+            label: Text('Reset all data…', style: TextStyle(color: c.danger)),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: c.danger),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             ),
-          ]),
-        ],
-      ),
+            onPressed: () => _confirmAndReset(context, ref),
+          ),
+        ]),
+      ],
     );
   }
 
@@ -145,109 +207,103 @@ class _VoiceSection extends ConsumerWidget {
       grouped.putIfAbsent(e.groupLabel, () => []).add(e);
     }
 
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.record_voice_over_outlined, size: 14, color: c.subtle),
-              const SizedBox(width: 6),
-              Text('VOICE ANNOUNCEMENTS', style: t.labelSmall),
-              const Spacer(),
-              Switch.adaptive(
-                value: settings.voiceEnabled,
-                onChanged: (v) {
-                  // First-ever enable: seed with the low-noise default set
-                  // so the user doesn't have to hunt through every toggle.
-                  final events = (v && settings.voiceEvents.isEmpty)
-                      ? AppSettings.defaultOnEvents
-                      : settings.voiceEvents;
-                  ref.read(settingsProvider.notifier).update(
-                        settings.copyWith(
-                          voiceEnabled: v,
-                          voiceEvents: events,
-                        ),
-                      );
-                },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                settings.voiceEnabled
+                    ? 'Voice announcements are on. Configure below.'
+                    : 'Turn on to have selected events read out loud.',
+                style: t.bodySmall?.copyWith(color: c.subtle),
               ),
-            ],
+            ),
+            Switch.adaptive(
+              value: settings.voiceEnabled,
+              onChanged: (v) {
+                // First-ever enable: seed with the low-noise default set
+                // so the user doesn't have to hunt through every toggle.
+                final events = (v && settings.voiceEvents.isEmpty)
+                    ? AppSettings.defaultOnEvents
+                    : settings.voiceEvents;
+                ref.read(settingsProvider.notifier).update(
+                      settings.copyWith(
+                        voiceEnabled: v,
+                        voiceEvents: events,
+                      ),
+                    );
+              },
+            ),
+          ],
+        ),
+        if (settings.voiceEnabled) ...[
+          const SizedBox(height: 10),
+          _TestVoiceButton(),
+          const SizedBox(height: 10),
+          _VoiceVolumeSlider(),
+          const SizedBox(height: 14),
+          for (final entry in grouped.entries) ...[
+            Text(entry.key.toUpperCase(), style: t.labelSmall),
+            const SizedBox(height: 4),
+            for (final e in entry.value)
+              _eventRow(context, e, settings, toggleEvent),
+            const SizedBox(height: 10),
+          ],
+          _thresholdRow(
+            context,
+            label: 'Long-distance threshold',
+            value: settings.voiceNotableDxKm,
+            suffix: 'km',
+            min: 1000,
+            max: 15000,
+            divisions: 28,
+            onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                  settings.copyWith(voiceNotableDxKm: v),
+                ),
+          ),
+          _thresholdRow(
+            context,
+            label: 'Strong-signal threshold',
+            value: settings.voiceStrongSignalDb,
+            suffix: 'dB',
+            min: -10,
+            max: 10,
+            divisions: 20,
+            onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                  settings.copyWith(voiceStrongSignalDb: v),
+                ),
+          ),
+          _thresholdRow(
+            context,
+            label: 'Solar-flux threshold',
+            value: settings.voiceSolarFluxSfi,
+            suffix: 'SFI',
+            min: 70,
+            max: 300,
+            divisions: 46,
+            onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                  settings.copyWith(voiceSolarFluxSfi: v),
+                ),
           ),
           const SizedBox(height: 8),
-          Text(
-            settings.voiceEnabled
-                ? 'Voice announcements for the events selected below.'
-                : 'Turn on to have selected events read out loud.',
-            style: t.bodySmall?.copyWith(color: c.subtle),
+          _thresholdRow(
+            context,
+            label: 'Max announcements / min',
+            value: settings.voiceRateLimitPerMinute,
+            suffix: '/min',
+            min: 1,
+            max: 20,
+            divisions: 19,
+            onChanged: (v) => ref.read(settingsProvider.notifier).update(
+                  settings.copyWith(voiceRateLimitPerMinute: v),
+                ),
           ),
-          if (settings.voiceEnabled) ...[
-            const SizedBox(height: 10),
-            _TestVoiceButton(),
-            const SizedBox(height: 10),
-            _VoiceVolumeSlider(),
-            const SizedBox(height: 14),
-            for (final entry in grouped.entries) ...[
-              Text(entry.key.toUpperCase(), style: t.labelSmall),
-              const SizedBox(height: 4),
-              for (final e in entry.value)
-                _eventRow(context, e, settings, toggleEvent),
-              const SizedBox(height: 10),
-            ],
-            _thresholdRow(
-              context,
-              label: 'Long-distance threshold',
-              value: settings.voiceNotableDxKm,
-              suffix: 'km',
-              min: 1000,
-              max: 15000,
-              divisions: 28,
-              onChanged: (v) => ref.read(settingsProvider.notifier).update(
-                    settings.copyWith(voiceNotableDxKm: v),
-                  ),
-            ),
-            _thresholdRow(
-              context,
-              label: 'Strong-signal threshold',
-              value: settings.voiceStrongSignalDb,
-              suffix: 'dB',
-              min: -10,
-              max: 10,
-              divisions: 20,
-              onChanged: (v) => ref.read(settingsProvider.notifier).update(
-                    settings.copyWith(voiceStrongSignalDb: v),
-                  ),
-            ),
-            _thresholdRow(
-              context,
-              label: 'Solar-flux threshold',
-              value: settings.voiceSolarFluxSfi,
-              suffix: 'SFI',
-              min: 70,
-              max: 300,
-              divisions: 46,
-              onChanged: (v) => ref.read(settingsProvider.notifier).update(
-                    settings.copyWith(voiceSolarFluxSfi: v),
-                  ),
-            ),
-            const SizedBox(height: 8),
-            _thresholdRow(
-              context,
-              label: 'Max announcements / min',
-              value: settings.voiceRateLimitPerMinute,
-              suffix: '/min',
-              min: 1,
-              max: 20,
-              divisions: 19,
-              onChanged: (v) => ref.read(settingsProvider.notifier).update(
-                    settings.copyWith(voiceRateLimitPerMinute: v),
-                  ),
-            ),
-            const SizedBox(height: 8),
-            _quietHoursRow(context, ref, settings),
-          ],
+          const SizedBox(height: 8),
+          _quietHoursRow(context, ref, settings),
         ],
-      ),
+      ],
     );
   }
 
@@ -461,29 +517,19 @@ class _DataCreditsSection extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final c = context.colors;
     TextStyle link() => TextStyle(color: c.accent);
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return Text.rich(
+      TextSpan(
+        style: t.bodySmall,
         children: [
-          Text('DATA CREDITS', style: t.labelSmall),
-          const SizedBox(height: 10),
-          Text.rich(
-            TextSpan(
-              style: t.bodySmall,
-              children: [
-                const TextSpan(text: 'Solar / propagation data © N0NBH — '),
-                TextSpan(text: 'hamqsl.com', style: link()),
-                const TextSpan(text: '.\nCallsign → grid lookups via '),
-                TextSpan(text: 'PSK Reporter', style: link()),
-                const TextSpan(text: ' — pskreporter.info.\n'),
-                TextSpan(
-                  text:
-                      'Both requests are opt-out under the settings above; nothing else leaves your machine.',
-                  style: TextStyle(color: c.subtle),
-                ),
-              ],
-            ),
+          const TextSpan(text: 'Solar / propagation data © N0NBH — '),
+          TextSpan(text: 'hamqsl.com', style: link()),
+          const TextSpan(text: '.\nCallsign → grid lookups via '),
+          TextSpan(text: 'PSK Reporter', style: link()),
+          const TextSpan(text: ' — pskreporter.info.\n'),
+          TextSpan(
+            text:
+                'Both requests are opt-out under the settings above; nothing else leaves your machine.',
+            style: TextStyle(color: c.subtle),
           ),
         ],
       ),
@@ -496,50 +542,45 @@ class _BackupSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = Theme.of(context).textTheme;
     final c = context.colors;
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('BACKUP', style: t.labelSmall),
-          const SizedBox(height: 10),
-          Text(
-            'Exports every QSO in your local logbook as CSV (RFC 4180). '
-            'Includes all current fields plus the raw_fields JSON so the file '
-            'is a complete snapshot.',
-            style: t.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              TextButton.icon(
-                icon: const Icon(Icons.file_download_outlined, size: 14),
-                label: const Text('Export logbook CSV…'),
-                style: TextButton.styleFrom(
-                  foregroundColor: c.text,
-                  backgroundColor: c.card,
-                  side: BorderSide(color: c.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
-                onPressed: () async {
-                  final path = await FilePicker.platform.saveFile(
-                    dialogTitle: 'Save CBScope logbook',
-                    fileName: 'cbscope_logbook_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.csv',
-                  );
-                  if (path == null) return;
-                  final csv = await ref.read(qsoRepoProvider).exportLogbookCsv();
-                  await File(path).writeAsString(csv);
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('Saved to $path'),
-                    behavior: SnackBarBehavior.floating,
-                  ));
-                },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Exports every QSO in your local logbook as CSV (RFC 4180). '
+          'Includes all current fields plus the raw_fields JSON so the file '
+          'is a complete snapshot.',
+          style: t.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            TextButton.icon(
+              icon: const Icon(Icons.file_download_outlined, size: 14),
+              label: const Text('Export logbook CSV…'),
+              style: TextButton.styleFrom(
+                foregroundColor: c.text,
+                backgroundColor: c.card,
+                side: BorderSide(color: c.border),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
-            ],
-          ),
-        ],
-      ),
+              onPressed: () async {
+                final path = await FilePicker.platform.saveFile(
+                  dialogTitle: 'Save CBScope logbook',
+                  fileName: 'cbscope_logbook_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.csv',
+                );
+                if (path == null) return;
+                final csv = await ref.read(qsoRepoProvider).exportLogbookCsv();
+                await File(path).writeAsString(csv);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('Saved to $path'),
+                  behavior: SnackBarBehavior.floating,
+                ));
+              },
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -576,14 +617,7 @@ class _EquipmentSectionState extends ConsumerState<_EquipmentSection> {
     final t = Theme.of(context).textTheme;
     final c = context.colors;
 
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('EQUIPMENT', style: t.labelSmall),
-          const SizedBox(height: 12),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Antennas', style: t.titleSmall),
@@ -663,10 +697,7 @@ class _EquipmentSectionState extends ConsumerState<_EquipmentSection> {
                 ]),
               ]),
             ),
-          ]),
-        ],
-      ),
-    );
+          ]);
   }
 
   String _antennaLabel(Antenna a) {
@@ -775,12 +806,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ],
           ),
+          // ---------- Setup / connection ----------
+          _group('My station', [
+            _row('Callsign', TextField(controller: _myCall, textCapitalization: TextCapitalization.characters)),
+            _row('Grid locator', TextField(controller: _myGrid, textCapitalization: TextCapitalization.characters)),
+          ], initiallyOpen: true, icon: Icons.person_outline),
+          const SizedBox(height: 12),
           _group('WSJT-CB UDP', [
             _row('Port', TextField(controller: _port, keyboardType: TextInputType.number)),
             _row('Bind address', TextField(controller: _bind, decoration: const InputDecoration(hintText: '0.0.0.0'))),
             _row('Multicast group', TextField(controller: _multicast, decoration: const InputDecoration(hintText: 'e.g. 224.0.0.1 (optional)'))),
-          ]),
-          const SizedBox(height: 16),
+          ], initiallyOpen: true, icon: Icons.cable),
+          const SizedBox(height: 12),
           _group('WSJT-CB ADIF log file', [
             _row('Path', Row(children: [
               Expanded(child: TextField(controller: _adifPath)),
@@ -813,55 +850,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-          ]),
-          const SizedBox(height: 16),
-          _group('My station', [
-            _row('Callsign', TextField(controller: _myCall, textCapitalization: TextCapitalization.characters)),
-            _row('Grid locator', TextField(controller: _myGrid, textCapitalization: TextCapitalization.characters)),
-          ]),
-          const SizedBox(height: 16),
-          _EquipmentSection(),
-          const SizedBox(height: 16),
-          const _VoiceSection(),
-          const SizedBox(height: 16),
-          _BackupSection(),
-          const SizedBox(height: 16),
-          const _DataCreditsSection(),
-          const SizedBox(height: 16),
-          _DangerZoneSection(),
-          const SizedBox(height: 16),
-          _group('Map style', [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  SizedBox(width: 140, child: Text('Basemap', style: Theme.of(context).textTheme.bodyMedium)),
-                  Expanded(
-                    child: CupertinoSlidingSegmentedControl<MapStyle>(
-                      groupValue: ref.watch(settingsProvider).mapStyle,
-                      onValueChanged: (v) {
-                        if (v == null) return;
-                        final s = ref.read(settingsProvider);
-                        ref.read(settingsProvider.notifier).update(s.copyWith(mapStyle: v));
-                      },
-                      children: const {
-                        MapStyle.regular:      Padding(padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Text('Regular')),
-                        MapStyle.cbscopeRetro: Padding(padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Text('CBScope Retro')),
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ]),
-          const SizedBox(height: 16),
-          _group('Map marker colors', [
-            _colorRow(context, ref, 'Logged QSOs',        (s) => s.qsoColor,    (s, v) => s.copyWith(qsoColor: v)),
-            _colorRow(context, ref, 'Live decodes',       (s) => s.decodeColor, (s, v) => s.copyWith(decodeColor: v)),
-            _colorRow(context, ref, 'PSK Reporter spots', (s) => s.pskColor,    (s, v) => s.copyWith(pskColor: v)),
-            _colorRow(context, ref, 'My location',        (s) => s.meColor,     (s, v) => s.copyWith(meColor: v)),
-          ]),
-          const SizedBox(height: 16),
+          ], initiallyOpen: true, icon: Icons.description_outlined),
+          const SizedBox(height: 12),
           _group('Callsign resolution', [
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -886,8 +876,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-          ]),
-          const SizedBox(height: 16),
+          ], icon: Icons.search),
+          const SizedBox(height: 12),
+
+          // ---------- Inventory ----------
+          _CollapsibleGroup(
+            title: 'Equipment',
+            icon: Icons.settings_input_antenna,
+            child: _EquipmentSection(),
+          ),
+          const SizedBox(height: 12),
+
+          // ---------- Alerts ----------
+          _CollapsibleGroup(
+            title: 'Voice announcements',
+            icon: Icons.record_voice_over_outlined,
+            child: const _VoiceSection(),
+          ),
+          const SizedBox(height: 12),
+
+          // ---------- Appearance ----------
           _group('Appearance', [
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -953,22 +961,80 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ],
               ),
             ),
-          ]),
+          ], icon: Icons.palette_outlined),
+          const SizedBox(height: 12),
+
+          // ---------- Map look-and-feel ----------
+          _group('Map style', [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  SizedBox(width: 140, child: Text('Basemap', style: Theme.of(context).textTheme.bodyMedium)),
+                  Expanded(
+                    child: CupertinoSlidingSegmentedControl<MapStyle>(
+                      groupValue: ref.watch(settingsProvider).mapStyle,
+                      onValueChanged: (v) {
+                        if (v == null) return;
+                        final s = ref.read(settingsProvider);
+                        ref.read(settingsProvider.notifier).update(s.copyWith(mapStyle: v));
+                      },
+                      children: const {
+                        MapStyle.regular:      Padding(padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Text('Regular')),
+                        MapStyle.cbscopeRetro: Padding(padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Text('CBScope Retro')),
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ], icon: Icons.map_outlined),
+          const SizedBox(height: 12),
+          _group('Map marker colors', [
+            _colorRow(context, ref, 'Logged QSOs',        (s) => s.qsoColor,    (s, v) => s.copyWith(qsoColor: v)),
+            _colorRow(context, ref, 'Live decodes',       (s) => s.decodeColor, (s, v) => s.copyWith(decodeColor: v)),
+            _colorRow(context, ref, 'PSK Reporter spots', (s) => s.pskColor,    (s, v) => s.copyWith(pskColor: v)),
+            _colorRow(context, ref, 'My location',        (s) => s.meColor,     (s, v) => s.copyWith(meColor: v)),
+          ], icon: Icons.pin_drop_outlined),
+          const SizedBox(height: 12),
+
+          // ---------- Data & maintenance ----------
+          _CollapsibleGroup(
+            title: 'Backup',
+            icon: Icons.file_download_outlined,
+            child: _BackupSection(),
+          ),
+          const SizedBox(height: 12),
+          const _CollapsibleGroup(
+            title: 'Data credits',
+            icon: Icons.info_outline,
+            child: _DataCreditsSection(),
+          ),
+          const SizedBox(height: 12),
+          _CollapsibleGroup(
+            title: 'Danger zone',
+            icon: Icons.warning_amber_rounded,
+            titleColor: c.danger,
+            child: _DangerZoneSection(),
+          ),
         ],
       ),
     );
   }
 
-  Widget _group(String title, List<Widget> rows) {
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+  Widget _group(
+    String title,
+    List<Widget> rows, {
+    bool initiallyOpen = false,
+    IconData? icon,
+  }) {
+    return _CollapsibleGroup(
+      title: title,
+      icon: icon,
+      initiallyOpen: initiallyOpen,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title.toUpperCase(), style: Theme.of(context).textTheme.labelSmall),
-          const SizedBox(height: 10),
-          ...rows,
-        ],
+        children: rows,
       ),
     );
   }

@@ -145,7 +145,11 @@ void _onDecode(Ref ref, VoiceAnnouncer a, WsjtxDecode d) {
       grid != null &&
       grid.length >= 4 &&
       !workedGrids.contains(grid.substring(0, 4).toUpperCase())) {
-    a.say('New grid: ${_letters(grid.substring(0, 4))}.');
+    final grid4 = grid.substring(0, 4);
+    final country = countryFromCbCallsign(upper);
+    a.say(country != null
+        ? 'New grid: ${_letters(grid4)}, $country.'
+        : 'New grid: ${_letters(grid4)}.');
   }
 
   // -------- New DXCC country CQ -----------------------------------------
@@ -249,7 +253,10 @@ class _LogbookMilestoneTracker {
       final priorSet = {...priorGrids};
       final short = grid.substring(0, 4).toUpperCase();
       if (priorSet.length == 1 && priorSet.contains(short)) {
-        a.say('New grid worked: ${_letters(short)}.');
+        final c = country ?? countryFromCbCallsign(q.call.toUpperCase());
+        a.say(c != null
+            ? 'New grid worked: ${_letters(short)}, $c.'
+            : 'New grid worked: ${_letters(short)}.');
       }
     }
 
@@ -435,19 +442,11 @@ double? _distanceKm(String gridA, String gridB) {
   return const Distance().as(LengthUnit.Kilometer, a, b);
 }
 
-/// Spell a callsign: split into runs of letters vs digits and insert spaces
-/// so the TTS engine doesn't try to pronounce "13DD753" as a number.
-String _spell(String call) {
-  final buf = StringBuffer();
-  bool? prevDigit;
-  for (final ch in call.split('')) {
-    final digit = RegExp(r'\d').hasMatch(ch);
-    if (prevDigit != null && prevDigit != digit) buf.write(' ');
-    buf.write(ch);
-    prevDigit = digit;
-  }
-  return buf.toString();
-}
+/// Spell a callsign one character at a time so the TTS engine reads
+/// e.g. "56PJ017" as "five six P J zero one seven" instead of trying to
+/// pronounce "fifty-six PJ seventeen". Every character gets its own
+/// space; adjacent digits therefore read as separate digit words too.
+String _spell(String call) => call.trim().split('').join(' ');
 
 /// Space out a grid locator so TTS reads it letter-by-letter.
 String _letters(String s) => s.split('').join(' ');

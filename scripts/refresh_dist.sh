@@ -25,7 +25,10 @@ flutter build macos --debug
 
 echo "==> Copying to $DIST/latestversion/"
 rm -rf "$DIST/latestversion/CBScope.app"
-cp -R build/macos/Build/Products/Debug/CBScope.app "$DIST/latestversion/"
+# `ditto` handles macOS bundles (symlinks + resource forks + acl) far more
+# reliably than `cp -R` when overwriting a previously-launched .app.
+/usr/bin/ditto build/macos/Build/Products/Debug/CBScope.app \
+  "$DIST/latestversion/CBScope.app"
 
 if [[ -f build/CBScope.dmg ]]; then
   cp build/CBScope.dmg "$DIST/CBScope.dmg"
