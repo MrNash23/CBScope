@@ -75,6 +75,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Timer? _replayAutoplay;
   Timer? _fadeTick;
 
+  /// Fit-to-QSOs runs once per screen mount. We wait for the first non-
+  /// empty logbook emission (so the map isn't zoomed to an empty set) and
+  /// fire exactly once — moving the camera on every rebuild would fight
+  /// the user's pinch/pan.
+  bool _initialFitDone = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +90,34 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       const Duration(milliseconds: 200),
       (_) => setState(() {}),
     );
+  }
+
+  /// Compute a bounding box that covers every logged QSO with a resolvable
+  /// grid (plus the operator's own QTH if set), pad it slightly, and
+  /// animate the camera to fit. No-op if there are no QSOs — the default
+  /// world view stays.
+  void _fitToQsos(List<Qso> qsos, LatLng? myLatLng) {
+    if (_initialFitDone) return;
+    final points = <LatLng>[];
+    if (myLatLng != null) points.add(myLatLng);
+    for (final q in qsos) {
+      final ll = gridToLatLng(q.gridsquare);
+      if (ll != null) points.add(ll);
+    }
+    if (points.length < 2) return;
+    _initialFitDone = true;
+    // Schedule the camera move for after this build completes — flutter_map
+    // rejects camera changes made mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _map.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints(points),
+          padding: const EdgeInsets.all(48),
+          maxZoom: 8,
+        ),
+      );
+    });
   }
 
   @override
@@ -124,6 +158,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       }
       return true;
     }).toList(growable: false);
+
+    // Auto-fit the camera to include every logged QSO the first time the
+    // logbook data is available. Once done, hands the map back to the user.
+    _fitToQsos(allQsos, myLatLng);
 
     final now = DateTime.now();
     // Replay "now" is either the wallclock or the timeline scrubber value.
@@ -187,8 +225,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         decodeMarkers.add(
           Marker(
             point: ll,
-            // Slightly larger marker + badge overhead when NEW CQ.
-            width: isNewCq ? 60 : 22,
+            // Slightly larger marker + badge overhead when NEW CQ (badge
+            // now includes the callsign, so we need more horizontal room).
+            width: isNewCq ? 130 : 22,
             height: isNewCq ? 32 : 22,
             child: _DecodeMarker(
               call: call,
@@ -317,9 +356,33 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         }
       }
       final logCutoff = now.toUtc().subtract(const Duration(minutes: 5));
-      final alreadyLogged = qsos.any((q) =>
+      // Use the *unfiltered* QSO stream — the user's Logbook filter (e.g.
+      // rating ≥ 3, specific antenna) would otherwise hide a freshly-
+      // logged row and leave the overlay lingering.
+      final alreadyLogged = allQsos.any((q) =>
           q.call.toUpperCase() == call && q.timeOn.isAfter(logCutoff));
-      if ((engagedByReply || callingTarget) && !alreadyLogged) {
+      // Also treat an observed 73 / RR73 exchange as "QSO complete" so the
+      // overlay drops the moment WSJT-CB sees the final message, even
+      // before the operator hits the Log button. Windowed at 60 s.
+      final completionCutoff = now.subtract(const Duration(seconds: 60));
+      final justCompleted = decodes.any((d) {
+        if (!d.receivedAt.isAfter(completionCutoff)) return false;
+        final msg = d.decode.message.trim().toUpperCase();
+        final tokens = msg.split(RegExp(r'\s+'));
+        if (tokens.length < 3) return false;
+        final last = tokens.last;
+        if (last != '73' && last != 'RR73') return false;
+        // Match either direction: DX told us 73 (first token = my call,
+        // sender = dxCall via Status), or we told DX 73 via offAir echo
+        // (first token = dxCall, message we just transmitted).
+        final first = firstToken(msg);
+        if (myCall != null && first == myCall) return true;
+        if (d.decode.offAir && first == call) return true;
+        return false;
+      });
+      if ((engagedByReply || callingTarget) &&
+          !alreadyLogged &&
+          !justCompleted) {
         hasRunning = true;
         isEngaged = engagedByReply;
         runningCall = call;
@@ -2583,7 +2646,7 @@ class _DecodeMarker extends StatelessWidget {
                     ),
                   ),
                   child: Text(
-                    'NEW CQ',
+                    'NEW CQ · $call',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: Colors.black,
                           fontSize: 8,
