@@ -111,9 +111,12 @@ class SherpaOnnxTtsBackend implements TtsBackend {
       _loudnessNormaliseWav(wav);
       await _slot.playFile(wav, volume: _volume);
     } finally {
-      // Give the player a moment to open the file, then wipe the temp dir.
-      // The audio buffer is already loaded so late deletion is safe.
-      unawaited(Future<void>.delayed(const Duration(seconds: 30))
+      // Delay the temp-dir deletion long enough that even the longest
+      // possible utterance is guaranteed done playing — deleting a WAV
+      // out from under an in-flight AVAudioFile has caused native
+      // segfaults on some macOS versions. 5 min > any voice line we'd
+      // generate, and the OS cleans /tmp on reboot anyway.
+      unawaited(Future<void>.delayed(const Duration(minutes: 5))
           .then((_) => tmp.delete(recursive: true).catchError((_) {
                 return tmp;
               })));

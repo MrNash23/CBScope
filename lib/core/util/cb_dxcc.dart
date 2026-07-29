@@ -1,25 +1,87 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
 /// CB (11 m) callsign → country lookup.
 ///
 /// The 11 m CB "Alpha Tango" style callsigns use a numeric division prefix
-/// that maps to a country/region (mostly following the WPX-like allocation
-/// used across European CB DX clubs). Not every CB org uses the same table,
-/// so this only covers the widely-agreed defaults — good enough to fill an
-/// empty `country` field on import for the common cases.
+/// that maps to a country. The hard-coded table below is a best-effort
+/// starting point — it's overlaid at lookup time by a "learned" map that
+/// grows every time WSJT-CB's ADIF gives us a fresh (prefix, country)
+/// pair, so the app self-corrects as the user works more DX.
 String? countryFromCbCallsign(String callsign) {
-  final c = callsign.trim().toUpperCase();
-  if (c.isEmpty) return null;
-
-  // Split leading digits from the rest — CB prefixes are 1-3 leading digits.
-  final match = RegExp(r'^(\d{1,3})').firstMatch(c);
-  if (match == null) return null;
-  final prefix = int.tryParse(match.group(1)!);
+  final prefix = _prefixOf(callsign);
   if (prefix == null) return null;
-
-  return _cbPrefixCountry[prefix];
+  return _learnedPrefixes[prefix] ?? _cbPrefixCountry[prefix];
 }
 
-/// Widely-used European CB DX division → country map. Add to this table over
-/// time; empty result means "unknown, don't overwrite whatever the ADIF said".
+/// Extract the leading 1–3 digit CB prefix from a callsign, or null if
+/// the callsign doesn't start with digits.
+int? _prefixOf(String callsign) {
+  final c = callsign.trim().toUpperCase();
+  if (c.isEmpty) return null;
+  final match = RegExp(r'^(\d{1,3})').firstMatch(c);
+  if (match == null) return null;
+  return int.tryParse(match.group(1)!);
+}
+
+/// Runtime cache of (prefix → country) pairs learned from WSJT-CB's ADIF
+/// output. Wins over the hard-coded table on lookup.
+final Map<int, String> _learnedPrefixes = {};
+SharedPreferences? _prefsRef;
+const _prefsKey = 'cb.learnedPrefixes';
+
+/// Load persisted learnings from SharedPreferences and remember the prefs
+/// handle for future writes. Call once at app boot (from the prefs
+/// provider). Cheap enough that calling it a second time is a no-op.
+Future<void> initCbPrefixLearner(SharedPreferences prefs) async {
+  _prefsRef = prefs;
+  final raw = prefs.getString(_prefsKey);
+  if (raw == null || raw.isEmpty) return;
+  try {
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    _learnedPrefixes.clear();
+    decoded.forEach((k, v) {
+      final pfx = int.tryParse(k);
+      if (pfx != null && v is String && v.isNotEmpty) {
+        _learnedPrefixes[pfx] = v;
+      }
+    });
+  } catch (_) {
+    // Corrupt payload — start over.
+  }
+}
+
+/// Remember a (callsign prefix, country) pair. No-op when either the
+/// callsign has no numeric prefix, the country is empty, or the mapping
+/// is already known. Fire-and-forget from callers.
+void learnCbPrefixCountry(String callsign, String? country) {
+  if (country == null || country.trim().isEmpty) return;
+  final prefix = _prefixOf(callsign);
+  if (prefix == null) return;
+  final trimmed = country.trim();
+  if (_learnedPrefixes[prefix] == trimmed) return;
+  _learnedPrefixes[prefix] = trimmed;
+  // Any encode/setString failure must NOT propagate — this is a
+  // fire-and-forget best-effort persistence and an unhandled async error
+  // here can crash the Dart isolate.
+  try {
+    final json = jsonEncode({
+      for (final e in _learnedPrefixes.entries) e.key.toString(): e.value,
+    });
+    final f = _prefsRef?.setString(_prefsKey, json);
+    if (f != null) f.catchError((_) => false);
+  } catch (_) {
+    // Swallow — the in-memory learning is already applied.
+  }
+}
+
+/// Alpha Tango DX Group division → country map. The AT divisions are NOT
+/// a simple sequential numbering of European countries — many entries
+/// here are best-effort. Confirmed against WSJT-CB's own display:
+///   13 → Germany, 14 → France, 26 → England.
+/// If you see a wrong country label in a decode / voice announcement,
+/// file it against this table.
 const Map<int, String> _cbPrefixCountry = {
   1:  'Germany',
   2:  'United Kingdom',
@@ -46,7 +108,7 @@ const Map<int, String> _cbPrefixCountry = {
   23: 'Romania',
   24: 'Bulgaria',
   25: 'Greece',
-  26: 'Turkey',
+  26: 'England',
   27: 'Russia',
   28: 'Ukraine',
   29: 'Belarus',

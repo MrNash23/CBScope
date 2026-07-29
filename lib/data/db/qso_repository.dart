@@ -122,9 +122,17 @@ class QsoRepository {
     if ((grid == null || grid.length < 4) && gridResolver != null) {
       grid = gridResolver(r.call()!);
     }
-    final country = (r.country() ?? '').isNotEmpty
-        ? r.country()
+    final adifCountry = r.country();
+    final country = (adifCountry ?? '').isNotEmpty
+        ? adifCountry
         : countryFromCbCallsign(r.call()!);
+    // Every ADIF row that ships with a country tells us "this prefix
+    // means this country" — bank the mapping so future CQ-only decodes
+    // announce the right country without us having to bake every AT
+    // division into the source.
+    if (adifCountry != null && adifCountry.isNotEmpty) {
+      learnCbPrefixCountry(r.call()!, adifCountry);
+    }
     final myCall = (r.stationCallsign() ?? r.operator_() ?? '').isNotEmpty
         ? (r.stationCallsign() ?? r.operator_())
         : fallbackMyCall;

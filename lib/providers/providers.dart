@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/util/cb_dxcc.dart';
 import '../data/adif/adif_parser.dart';
 import '../data/adif/adif_tail_watcher.dart';
 import '../data/db/database.dart';
@@ -34,8 +35,13 @@ final qsoRepoProvider = Provider<QsoRepository>((ref) {
   return repo;
 });
 
-final prefsProvider =
-    FutureProvider<SharedPreferences>((_) => SharedPreferences.getInstance());
+final prefsProvider = FutureProvider<SharedPreferences>((_) async {
+  final prefs = await SharedPreferences.getInstance();
+  // Warm the CB-prefix-country self-learning cache from disk before any
+  // provider that consumes prefs starts firing lookups.
+  await initCbPrefixLearner(prefs);
+  return prefs;
+});
 
 /// ---------------- Settings ----------------
 
