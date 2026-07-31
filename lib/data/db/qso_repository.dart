@@ -297,6 +297,21 @@ class QsoRepository {
     }
   }
 
+  /// Rewrite the `country` column on QSOs that were imported with a
+  /// wrong hard-coded CB-prefix country label (e.g. before we knew that
+  /// prefix 30 is Spain, not Serbia). Only touches rows whose stored
+  /// country exactly matches the known-wrong value — user or
+  /// ADIF-supplied labels are untouched.
+  Future<void> repairKnownPrefixCountryMistakes() async {
+    for (final fix in knownWrongPrefixCountryFixes) {
+      await (db.update(db.qsos)
+            ..where((t) =>
+                t.call.like('${fix.prefix}%') &
+                t.country.equals(fix.oldWrong)))
+          .write(QsosCompanion(country: Value(fix.newRight)));
+    }
+  }
+
   // ---------------- Equipment library ----------------
 
   Stream<List<Antenna>> watchAntennas() =>

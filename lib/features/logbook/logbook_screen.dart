@@ -12,6 +12,7 @@ import '../../data/adif/adif_parser.dart';
 import '../../data/db/database.dart';
 import '../../data/db/qso_repository.dart';
 import '../../providers/providers.dart';
+import '../station/callsign_lookup_dialog.dart';
 import '../station/station_profile_sheet.dart';
 
 class LogbookScreen extends ConsumerStatefulWidget {
@@ -112,6 +113,9 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
                   title: 'Logbook',
                   subtitle: 'Drag an ADI file anywhere on this pane to import.',
                   actions: [
+                    _iconTextButton(Icons.search, 'Look up call',
+                        () => showCallsignLookup(context)),
+                    const SizedBox(width: 8),
                     _iconTextButton(Icons.file_download_outlined, 'Import', _pickAndImport),
                     const SizedBox(width: 8),
                     _iconTextButton(Icons.file_upload_outlined, 'Export', _exportAdif),
@@ -122,8 +126,9 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
                     Expanded(
                       child: TextField(
                         controller: _searchCtrl,
+                        textInputAction: TextInputAction.search,
                         decoration: const InputDecoration(
-                          hintText: 'Search by callsign…',
+                          hintText: 'Filter table by callsign…  (Enter = open profile)',
                           prefixIcon: Icon(Icons.search, size: 16),
                         ),
                         onChanged: (v) {
@@ -134,6 +139,10 @@ class _LogbookScreenState extends ConsumerState<LogbookScreen> {
                             antennaId: f.antennaId, radioId: f.radioId,
                             minRating: f.minRating, reviewState: f.reviewState,
                           );
+                        },
+                        onSubmitted: (v) {
+                          final call = v.trim().toUpperCase();
+                          if (call.isNotEmpty) showStationProfile(context, call);
                         },
                       ),
                     ),

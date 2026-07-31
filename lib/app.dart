@@ -168,16 +168,19 @@ class _ShellState extends ConsumerState<_Shell> {
     ref.watch(pskSpotsProvider);
     ref.watch(voicePipelineProvider);
 
-    Widget body;
-    switch (_index) {
-      case 0: body = const LiveScreen(); break;
-      case 1: body = const ReviewScreen(); break;
-      case 2: body = const LogbookScreen(); break;
-      case 3: body = const StatsScreen(); break;
-      case 4: body = const MapScreen(); break;
-      case 5: body = const SettingsScreen(); break;
-      default: body = const LiveScreen();
-    }
+    // IndexedStack keeps every tab mounted (only the selected one is
+    // painted) — so filter toggles, map camera position, logbook scroll
+    // position and other local state survive tab switches instead of
+    // being thrown away when the widget rebuilds.
+    const tabs = <Widget>[
+      LiveScreen(),
+      ReviewScreen(),
+      LogbookScreen(),
+      StatsScreen(),
+      MapScreen(),
+      SettingsScreen(),
+    ];
+    final body = IndexedStack(index: _index, children: tabs);
 
     final reviewCount = ref.watch(needsReviewCountProvider).valueOrNull ?? 0;
     final items = [
@@ -198,7 +201,7 @@ class _ShellState extends ConsumerState<_Shell> {
             onSelect: (i) => setState(() => _index = i),
             items: items,
             footer: Text(
-              'v0.2.1',
+              'v0.2.2',
               style: Theme.of(context).textTheme.labelSmall,
             ),
           ),

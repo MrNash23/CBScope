@@ -25,6 +25,18 @@ int? _prefixOf(String callsign) {
   return int.tryParse(match.group(1)!);
 }
 
+/// Historical mistakes in the hard-coded [_cbPrefixCountry] table that
+/// leaked into imported QSO rows before we knew better. The one-shot
+/// startup repair (see `QsoRepository.repairKnownPrefixCountryMistakes`)
+/// rewrites any QSO whose call starts with these digits AND whose
+/// stored country matches the wrong value — leaving user-supplied /
+/// ADIF-supplied labels alone.
+const List<({int prefix, String oldWrong, String newRight})>
+    knownWrongPrefixCountryFixes = [
+  (prefix: 26, oldWrong: 'Turkey', newRight: 'England'),
+  (prefix: 30, oldWrong: 'Serbia', newRight: 'Spain'),
+];
+
 /// Runtime cache of (prefix → country) pairs learned from WSJT-CB's ADIF
 /// output. Wins over the hard-coded table on lookup.
 final Map<int, String> _learnedPrefixes = {};
@@ -78,10 +90,12 @@ void learnCbPrefixCountry(String callsign, String? country) {
 
 /// Alpha Tango DX Group division → country map. The AT divisions are NOT
 /// a simple sequential numbering of European countries — many entries
-/// here are best-effort. Confirmed against WSJT-CB's own display:
-///   13 → Germany, 14 → France, 26 → England.
+/// here are best-effort. Confirmed against WSJT-CB's own display or
+/// PSK Reporter cross-check: 13 → Germany, 14 → France, 15 → Italy,
+/// 19 → Finland, 26 → England, 30 → Spain, 35 → Albania.
 /// If you see a wrong country label in a decode / voice announcement,
-/// file it against this table.
+/// file it against this table (and add the (old, new) pair to
+/// `knownWrongPrefixCountryFixes` so already-imported QSOs get repaired).
 const Map<int, String> _cbPrefixCountry = {
   1:  'Germany',
   2:  'United Kingdom',
@@ -112,7 +126,7 @@ const Map<int, String> _cbPrefixCountry = {
   27: 'Russia',
   28: 'Ukraine',
   29: 'Belarus',
-  30: 'Serbia',
+  30: 'Spain',
   31: 'Croatia',
   32: 'Bosnia and Herzegovina',
   33: 'Slovenia',

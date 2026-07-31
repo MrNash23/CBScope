@@ -29,6 +29,9 @@ Purpose-built for WSJT-CB. Streams decodes and QSOs live over UDP, tails the ADI
 - Live decodes as fading dots with SNR / distance / mode tooltips
 - Logged QSOs coloured by equipment, with an on-demand signal heatmap per radio/antenna and a dB legend
 - **Running-QSO overlay**: `Calling → Working` state driven by WSJT-CB Status + directed decodes, plus a **Calling-CQ halo** on your QTH while transmitting a CQ
+- **NEW-CQ badge** — a call you've never worked calling CQ is labelled inline with its callsign so you can spot fresh grids at a glance
+- **Callsign lookup** (🔍 in the toolbar or Logbook header) — type any callsign for its last-known grid, country, QSO history and distance
+- Auto-zoom to fit all logged QSOs on open; camera + filters persist across tab switches
 - PSK Reporter spot dots + animated great-circle traffic (Mercator-correct)
 - Greyline overlay, time-replay scrubber, retro / OSM tile styles
 
@@ -50,7 +53,8 @@ Purpose-built for WSJT-CB. Streams decodes and QSOs live over UDP, tails the ADI
 **Voice**
 - Optional spoken alerts for events you care about — new callsigns / grids / countries calling CQ, someone answering your call, QSO logged, personal-best DX, milestones, propagation swings, WSJT-CB connection health
 - Uses the bundled Alan voice (British male, Piper VITS) via a compact sherpa-onnx runtime; fully offline, no cloud calls
-- Per-event toggles, adjustable thresholds, rate limit, and UTC quiet-hours all live in *Settings → Voice announcements*
+- Callsigns are read digit-by-digit and letter-by-letter; grid announcements include the country (learned automatically from your ADIF imports)
+- Per-event toggles, live volume slider with drag-to-preview, rate limit, and UTC quiet-hours all live in *Settings → Voice announcements*
 
 ## Quick start
 

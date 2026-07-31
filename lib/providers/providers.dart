@@ -32,6 +32,7 @@ final qsoRepoProvider = Provider<QsoRepository>((ref) {
   // One-shot cleanup for legacy CB-band dupes (see repairCbBandDuplicates).
   // Fire-and-forget — the sync-only Provider must return the repo now.
   unawaited(repo.repairCbBandDuplicates());
+  unawaited(repo.repairKnownPrefixCountryMistakes());
   return repo;
 });
 

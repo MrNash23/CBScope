@@ -16,6 +16,7 @@ import '../../core/widgets/propagation_card.dart';
 import '../../data/db/database.dart';
 import '../../data/psk_reporter/psk_reporter_client.dart';
 import '../../providers/providers.dart';
+import '../station/callsign_lookup_dialog.dart';
 import '../station/station_profile_sheet.dart';
 import 'heatmap_overlay.dart';
 
@@ -606,6 +607,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 },
               ),
               const Spacer(),
+              _iconButton(
+                Icons.search,
+                () => showCallsignLookup(context),
+              ),
+              const SizedBox(width: 6),
               _iconButton(
                 Icons.zoom_out,
                 () => _map.move(_map.camera.center, _map.camera.zoom - 1),
