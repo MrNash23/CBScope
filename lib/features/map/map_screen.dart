@@ -373,11 +373,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         if (tokens.length < 3) return false;
         final last = tokens.last;
         if (last != '73' && last != 'RR73') return false;
-        // Match either direction: DX told us 73 (first token = my call,
-        // sender = dxCall via Status), or we told DX 73 via offAir echo
-        // (first token = dxCall, message we just transmitted).
+        // Only count the completion of the *current* QSO — otherwise a
+        // 73 from a station we worked earlier would suppress the
+        // overlay for the new one we're mid-exchange with. Standard FT8
+        // is "TO_CALL FROM_CALL PAYLOAD"; the offAir echo of our own TX
+        // is "DXCALL MYCALL PAYLOAD".
         final first = firstToken(msg);
-        if (myCall != null && first == myCall) return true;
+        final second = tokens.length >= 2
+            ? tokens[1].replaceAll(RegExp(r'^<|>$'), '')
+            : '';
+        if (myCall != null && first == myCall && second == call) return true;
         if (d.decode.offAir && first == call) return true;
         return false;
       });
